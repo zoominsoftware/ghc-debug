@@ -133,7 +133,7 @@ pinned block. This will be useful later. In order to use it with the generic
 `closureCensusBy` it needs to be an instance of `Semigroup`.
 
 ```haskell
-data CensusStats = CS { n :: !Count, cssize :: !Size, csmax :: !(Max Size) }
+data CensusStats = CS { cscount :: !Count, cssize :: !Size, csmax :: !(Max Size) }
 
 newtype PinnedCensusStats = PinnedCensusStats (CensusStats, [(ClosurePtr, SizedClosure)]) deriving (Semigroup)
 ```
@@ -157,7 +157,7 @@ censusPinnedBlocks bs = closureCensusBy go
           -> DebugM (Maybe (BlockPtr, PinnedCensusStats))
     go cp d =
       let cs :: CensusStats
-          cs = CensusStats (Count 1) (dcSize d) (Max (dcSize d))
+          cs = CS (Count 1) (dcSize d) (Max (dcSize d))
 
           bp :: BlockPtr
           bp = applyBlockMask cp
