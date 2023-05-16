@@ -42,6 +42,7 @@ import Data.Char
 import Data.List (intercalate, foldl', sort, group, sortBy, groupBy)
 import Data.Maybe       ( catMaybes )
 import Data.Function
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.HashMap.Strict as M
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IS
@@ -326,7 +327,8 @@ ppClosure showBox prec c = case c of
     BCOClosure {..} -> app
         ["_bco", showBox 10 bcoptrs]
     ArrWordsClosure {..} -> app
-        ["ARR_WORDS", "("++show bytes ++ " bytes)", ((show $ arrWordsBS $ take (min 100 $ fromIntegral bytes) arrWords)) ]
+        ["ARR_WORDS (", "("++show bytes ++ " bytes)"
+        , show . BSL.take (fromIntegral bytes) . arrWordsBS $ arrWords]
     MutArrClosure {..} -> app
         --["toMutArray", "("++show (length mccPayload) ++ " ptrs)",  intercalate "," (shorten (map (showBox 10) mccPayload))]
         ["[", intercalate ", " (shorten (map (showBox 10) mccPayload)),"]"]
