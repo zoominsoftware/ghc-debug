@@ -91,15 +91,7 @@ string_prog e = do
 stringAnalysis :: [ClosurePtr] -> DebugM (Map.Map _ _)
 stringAnalysis rroots = (\(_, r, _) -> r) <$> runRWST (traceFromM funcs rroots) () (Map.empty)
   where
-    funcs = TraceFunctions {
-               papTrace = const (return ())
-              , srtTrace = const (return ())
-              , stackTrace = const (return ())
-              , closTrace = closAccum
-              , visitedVal = const (return ())
-              , conDescTrace = const (return ())
-
-            }
+    funcs = justClosures closAccum
 
     getKey :: InfoTablePtr -> DebugM String
     getKey itblp = do

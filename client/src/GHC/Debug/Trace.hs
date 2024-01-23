@@ -53,10 +53,11 @@ data TraceFunctions m =
       , closTrace :: !(ClosurePtr -> SizedClosure -> m DebugM () -> m DebugM ())
       , visitedVal :: !(ClosurePtr -> (m DebugM) ())
       , conDescTrace :: !(ConstrDesc -> m DebugM ())
+      , ccsTrace :: !(GenCCSPayload CCSPtr CCPtr -> m DebugM ())
       }
 
 justClosures :: C m => (ClosurePtr -> SizedClosure -> m DebugM () -> m DebugM ()) -> TraceFunctions m
-justClosures f = TraceFunctions nop nop nop f nop nop
+justClosures f = TraceFunctions nop nop nop f nop nop nop
   where
     nop = const (return ())
 
@@ -92,7 +93,7 @@ traceClosureFromM !k = go
         else do
         sc <- lift $ lift $ dereferenceClosure cp
         ReaderT $ \st -> closTrace k cp sc
-         (runReaderT (() <$ hextraverse pure gosrt gop gocd gos go sc) st)
+         (runReaderT (() <$ hextraverse goccs gosrt gop gocd gos go sc) st)
 
 
     gos st = do
@@ -113,3 +114,8 @@ traceClosureFromM !k = go
       p' <- lift $ lift $ dereferenceSRT p
       lift $ srtTrace k p'
       () <$ traverse go p'
+
+    goccs p = do
+      p' <- lift $ lift $ dereferenceCCS p
+      lift $ ccsTrace k p'
+

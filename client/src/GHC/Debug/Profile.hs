@@ -105,15 +105,7 @@ closureCensusBy f cps = do
 census2LevelClosureType :: [ClosurePtr] -> DebugM CensusByClosureType
 census2LevelClosureType cps = snd <$> runStateT (traceFromM funcs cps) Map.empty
   where
-    funcs = TraceFunctions {
-               papTrace = const (return ())
-              , srtTrace = const (return ())
-              , stackTrace = const (return ())
-              , closTrace = closAccum
-              , visitedVal = const (return ())
-              , conDescTrace = const (return ())
-
-            }
+    funcs = justClosures closAccum
     -- Add cos
     closAccum  :: ClosurePtr
                -> SizedClosure

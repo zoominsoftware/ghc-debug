@@ -7,7 +7,6 @@ module GHC.Debug.Retainers
   , findRetainersOfConstructor
   , findRetainersOfConstructorExact
   , findRetainersOfInfoTable
-  , findRetainers
   , addLocationToStack
   , displayRetainerStack
   , addLocationToStack'
@@ -147,15 +146,7 @@ findRetainers :: Maybe Int
   -> [ClosurePtr] -> DebugM [[ClosurePtr]]
 findRetainers limit filter rroots = (\(_, r, _) -> snd r) <$> runRWST (traceFromM funcs rroots) [] (limit, [])
   where
-    funcs = TraceFunctions {
-               papTrace = const (return ())
-              , srtTrace = const (return ())
-              , stackTrace = const (return ())
-              , closTrace = closAccum
-              , visitedVal = const (return ())
-              , conDescTrace = const (return ())
-
-            }
+    funcs = justClosures closAccum
     -- Add clos
     closAccum  :: ClosurePtr
                -> SizedClosure

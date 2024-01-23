@@ -25,14 +25,7 @@ parCount = traceParFromM funcs . map (ClosurePtrWithInfo ())
 count :: [ClosurePtr] -> DebugM CensusStats
 count cps = snd <$> runStateT (traceFromM funcs cps) (CS 0 0 0)
   where
-    funcs = TraceFunctions {
-               papTrace = const (return ())
-              , srtTrace = const (return ())
-              , stackTrace = const (return ())
-              , closTrace = closAccum
-              , visitedVal = const (return ())
-              , conDescTrace = const (return ())
-            }
+    funcs = justClosures closAccum
 
     closAccum  :: ClosurePtr
                -> SizedClosure

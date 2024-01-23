@@ -92,15 +92,7 @@ type PtrClosure = DebugClosureWithSize CCSPtr SrtPayload PapPayload ConstrDesc S
 censusObjectEquiv :: [ClosurePtr] -> DebugM ObjectEquivState
 censusObjectEquiv cps = snd <$> runStateT (traceFromM funcs cps) (ObjectEquivState PS.empty IM.empty IM.empty)
   where
-    funcs = TraceFunctions {
-               papTrace = const (return ())
-              , srtTrace = const (return ())
-              , stackTrace = const (return ())
-              , closTrace = closAccum
-              , visitedVal = const (return ())
-              , conDescTrace = const (return ())
-
-            }
+    funcs = justClosures closAccum
     -- Add cos
     closAccum  :: ClosurePtr
                -> SizedClosure

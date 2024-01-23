@@ -61,15 +61,7 @@ programX sizeOf anal e = do
 stringAnalysis :: [ClosurePtr] -> DebugM (Map.Map String (S.Set ClosurePtr))
 stringAnalysis rroots = (\(_, r, _) -> r) <$> runRWST (traceFromM funcs rroots) False (Map.empty)
   where
-    funcs = TraceFunctions {
-               papTrace = const (return ())
-              , srtTrace = const (return ())
-              , stackTrace = const (return ())
-              , closTrace = closAccum
-              , visitedVal = const (return ())
-              , conDescTrace = const (return ())
-
-            }
+    funcs = justClosures closAccum
 
     -- First time we have visited a closure
     closAccum  :: ClosurePtr
@@ -140,15 +132,7 @@ printResult m = do
 arrWordsAnalysis :: [ClosurePtr] -> DebugM (Map.Map ByteString (S.Set ClosurePtr))
 arrWordsAnalysis rroots = (\(_, r, _) -> r) <$> runRWST (traceFromM funcs rroots) () (Map.empty)
   where
-    funcs = TraceFunctions {
-               papTrace = const (return ())
-              , srtTrace = const (return ())
-              , stackTrace = const (return ())
-              , closTrace = closAccum
-              , visitedVal = const (return ())
-              , conDescTrace = const (return ())
-
-            }
+    funcs = justClosures closAccum
 
     -- First time we have visited a closure
     closAccum  :: ClosurePtr

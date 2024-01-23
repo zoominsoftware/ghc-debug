@@ -29,8 +29,7 @@ snapshot fp = do
 traceFrom :: [ClosurePtr] -> DebugM ()
 traceFrom cps = runIdentityT (traceFromM funcs cps)
   where
-    nop = const (return ())
-    funcs = TraceFunctions nop nop nop clos (const (return ())) nop
+    funcs = justClosures clos
 
     clos :: ClosurePtr -> SizedClosure -> (IdentityT DebugM) ()
               ->  (IdentityT DebugM) ()
