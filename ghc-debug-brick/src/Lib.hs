@@ -12,6 +12,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE NamedFieldPuns #-}
 module Lib
   ( -- * Running/Connecting to a debuggee
     Debuggee
@@ -51,6 +52,7 @@ module Lib
   , infoSourceLocation
   , GD.dereferenceClosure
   , run
+  , ccsReferences
 
     -- * Common initialisation
   , initialTraversal
@@ -78,6 +80,8 @@ module Lib
   -- * Types
   , Ptr(..)
   , CCSPtr
+  , CCPayload
+  , GenCCSPayload
   , toPtr
   , dereferencePtr
   , ConstrDesc(..)
@@ -268,6 +272,8 @@ type Closure = DebugClosure CCSPtr SrtCont PayloadCont ConstrDescCont StackCont 
 data ListItem ccs srt a b c d
   = ListData
   | ListOnlyInfo InfoTablePtr
+  | ListCCS CCSPtr (GenCCSPayload CCSPtr CCPayload)
+  | ListCC CCPayload
   | ListFullClosure (DebugClosure ccs srt a b c d)
 
 data DebugClosure ccs srt p cd s c
@@ -279,54 +285,39 @@ data DebugClosure ccs srt p cd s c
     { _stackPtr :: StackCont
     , _stackStack :: GD.GenStackFrames srt c
     }
-  | CCS
-    { _ccsPtr :: CCSPtr
-    , _ccPayload :: GenCCSPayload CCSPtr CCPayload
-    }
   deriving Show
 
 toPtr :: DebugClosure ccs srt p cd s c -> Ptr
 toPtr (Closure cp _) = CP cp
 toPtr (Stack sc _)   = SP sc
-toPtr (CCS ccsp _ )  = CCSP ccsp
 
-data Ptr = CP ClosurePtr | SP StackCont | CCSP CCSPtr deriving (Eq, Ord)
+data Ptr = CP ClosurePtr | SP StackCont deriving (Eq, Ord)
 
 
 dereferencePtr :: Debuggee -> Ptr -> IO (DebugClosure CCSPtr SrtCont PayloadCont ConstrDescCont StackCont ClosurePtr)
 dereferencePtr dbg (CP cp) = run dbg (Closure <$> pure cp <*> GD.dereferenceClosure cp)
 dereferencePtr dbg (SP sc) = run dbg (Stack <$> pure sc <*> GD.dereferenceStack sc)
-dereferencePtr dbg (CCSP ccsp) = run dbg (CCS <$> pure ccsp <*> go)
-  where
-    go = do
-      ccs <- GD.dereferenceCCS ccsp
-      bitraverse pure GD.dereferenceCC ccs
 
 instance Hextraversable DebugClosure where
   hextraverse p f g h i j (Closure cp c) = Closure cp <$> hextraverse p f g h i j c
   hextraverse _ p _ _ _ h (Stack sp s) = Stack sp <$> bitraverse p h s
-  hextraverse _ _ _ _ _ _ (CCS sp s) = pure $ CCS sp s
 
 closureShowAddress :: DebugClosure ccs srt p cd s c -> String
 closureShowAddress (Closure c _) = show c
 closureShowAddress (Stack  (StackCont s _) _) = show s
-closureShowAddress (CCS c _) = show c
 
 -- | Get the exclusive size (not including any referenced closures) of a closure.
 closureExclusiveSize :: DebugClosure ccs srt p cd s c -> Size
 closureExclusiveSize (Stack{}) = Size (-1)
-closureExclusiveSize (CCS{}) = Size (-1)
 closureExclusiveSize (Closure _ c) = (GD.dcSize c)
 
 closureSourceLocation :: Debuggee -> DebugClosure ccs srt p cd s c -> IO (Maybe SourceInformation)
-closureSourceLocation _ (CCS{}) = return Nothing
 closureSourceLocation _ (Stack _ _) = return Nothing
 closureSourceLocation e (Closure _ c) = run e $ do
   request (RequestSourceInfo (tableId (info (noSize c))))
 
 closureInfoPtr :: DebugClosure ccs srt p cd s c -> Maybe InfoTablePtr
 closureInfoPtr (Stack {}) = Nothing
-closureInfoPtr (CCS {}) = Nothing
 closureInfoPtr (Closure _ c) = Just (tableId (info (noSize c)))
 
 infoSourceLocation :: Debuggee -> InfoTablePtr -> IO (Maybe SourceInformation)
@@ -375,18 +366,23 @@ closureReferences e (Closure _ closure) = run e $ do
         refCCS <- do
           GD.dereferenceCCS ccsPtr >>= \ccs ->
             bitraverse pure GD.dereferenceCC ccs
-        return $ ListFullClosure $ CCS ccsPtr refCCS
+        return $ ListCCS ccsPtr refCCS
   closureReferencesAndLabels wrapClosure
                              wrapStack
                              wrapCCS
                              (unDCS closure')
-closureReferences e (CCS _ ccs) = do
-  case ccsPrevStack ccs of
-    Nothing -> pure []
-    Just ccsPtr -> run e $ do
-      child' <- GD.dereferenceCCS ccsPtr
-      child <- bitraverse pure GD.dereferenceCC child'
-      pure [("child",ListFullClosure $ CCS ccsPtr child)]
+
+ccsReferences :: Debuggee -> GenCCSPayload CCSPtr CCPayload -> IO [ListItem ccs srt a b c d]
+ccsReferences e initialCcs = run e $ (ListCC (ccsCc initialCcs) :) <$> go initialCcs
+  where
+    go ccs = do
+      case ccsPrevStack ccs of
+        Nothing -> pure [ListCC (ccsCc ccs)]
+        Just ccsPtr -> do
+          child <- GD.dereferenceCCS ccsPtr
+          child' <- bitraverse pure GD.dereferenceCC child
+          children <- go child'
+          return (ListCC (ccsCc child') : children)
 
 reverseClosureReferences :: HG.HeapGraph Size
                          -> HG.ReverseGraph
@@ -401,7 +397,6 @@ reverseClosureReferences :: HG.HeapGraph Size
 reverseClosureReferences hg rm _ c =
   case c of
     Stack {} -> error "Nope - Stack"
-    CCS {} -> error "Nope - CCS"
     Closure cp _ -> case (HG.reverseEdges cp rm) of
                       Nothing -> return []
                       Just es ->
@@ -424,7 +419,6 @@ fillConstrDesc e closure = do
 
 -- | Pretty print a closure
 closurePretty :: Debuggee -> DebugClosure CCSPtr InfoTablePtr PayloadCont ConstrDesc s ClosurePtr ->  IO String
-closurePretty _ (CCS _ ccs) = return $ (show $ ccsCc ccs)
 closurePretty _ (Stack _ frames) = return $ (show (length frames) ++ " frames")
 closurePretty dbg (Closure _ closure) = run dbg $  do
   closure' <- hextraverse pure GD.dereferenceSRT GD.dereferencePapPayload pure pure pure closure

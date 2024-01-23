@@ -43,7 +43,6 @@ import qualified Data.Text as T
 import qualified Data.Map as M
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Set as S
-import Data.Maybe
 import qualified Data.Foldable as F
 import Text.Read (readMaybe)
 
@@ -232,6 +231,21 @@ renderClosureDetails (cd@(ClosureDetails {})) =
     ]
 renderClosureDetails ((LabelNode n)) = txt n
 renderClosureDetails ((InfoDetails info')) = vLimit 8 $ vBox $ renderInfoInfo info'
+renderClosureDetails (CCSDetails _ _ptr (Debug.CCSPayload{..})) = vLimit 8 $ vBox $
+  [ labelled "ID" $ vLimit 1 (str $ show ccsID)
+  ] ++ renderCCPayload ccsCc
+renderClosureDetails (CCDetails _ c) = vLimit 8 $ vBox $ renderCCPayload c
+
+renderCCPayload :: CCPayload -> [Widget Name]
+renderCCPayload Debug.CCPayload{..} =
+  [ labelled "Label" $ vLimit 1 (str ccLabel)
+  , labelled "Module" $ vLimit 1 (str ccMod)
+  , labelled "Location" $ vLimit 1 (str ccLoc)
+  , labelled "Allocation" $ vLimit 1 (str $ show ccMemAlloc)
+  , labelled "Time Ticks" $ vLimit 1 (str $ show ccTimeTicks)
+  , labelled "Is CAF" $ vLimit 1 (str $ show ccIsCaf)
+  ]
+
 
 footer :: Int -> Maybe Int -> FooterMode -> Widget Name
 footer n m mode = vLimit 1 $
@@ -396,18 +410,26 @@ myAppHandleEvent brickEvent = do
 
 getChildren :: Debuggee -> ClosureDetails
             -> IO [ClosureDetails]
+getChildren _ LabelNode{} = return []
+getChildren _ CCDetails {} = return []
+getChildren _ InfoDetails {} = return []
 getChildren d (ClosureDetails c _ _) = do
   children <- closureReferences d c
   children' <- traverse (traverse (fillListItem d)) children
   mapM (\(lbl, child) -> getClosureDetails d (pack lbl) child) children'
-getChildren _ _ = return []
+getChildren d (CCSDetails _ _ cp) = do
+  references <- zip [0 :: Int ..] <$> ccsReferences d cp
+  mapM (\(lbl, cc) -> getClosureDetails d (pack (show lbl)) cc) references
+
 
 fillListItem :: Debuggee
              -> ListItem CCSPtr SrtCont PayloadCont ConstrDescCont StackCont ClosurePtr
              -> IO (ListItem CCSPtr SrtCont PayloadCont ConstrDesc StackCont ClosurePtr)
 fillListItem _ (ListOnlyInfo x) = return $ ListOnlyInfo x
-fillListItem d(ListFullClosure cd) = ListFullClosure <$> fillConstrDesc d cd
+fillListItem d (ListFullClosure cd) = ListFullClosure <$> fillConstrDesc d cd
 fillListItem _ ListData = return ListData
+fillListItem _ (ListCCS c1 c2) = return $ ListCCS c1 c2
+fillListItem _ (ListCC c1) = return $ ListCC c1
 
 mkIOTree :: Debuggee
          -> [a]
@@ -513,7 +535,11 @@ renderInlineClosureDesc :: ClosureDetails -> [Widget n]
 renderInlineClosureDesc (LabelNode t) = [txtLabel t]
 renderInlineClosureDesc (InfoDetails info') =
   [txtLabel (_labelInParent info'), txt "   ", txt (_pretty info')]
-renderInlineClosureDesc closureDesc =
+renderInlineClosureDesc (CCSDetails label _cptr ccspayload) =
+  [ txtLabel label, txt "   ", txt (prettyCCS ccspayload)]
+renderInlineClosureDesc (CCDetails label cc) =
+  [ txtLabel label, txt "   ", txt (prettyCC cc)]
+renderInlineClosureDesc closureDesc@(ClosureDetails{}) =
                     [ txtLabel (_labelInParent (_info closureDesc))
                     , txt "   "
                     , colorEra $ txt $  pack (closureShowAddress (_closure closureDesc))
@@ -525,6 +551,13 @@ renderInlineClosureDesc closureDesc =
     colorEra = case colorId of
       Just (Debug.EraWord i) -> modifyDefAttr (flip Vty.withBackColor (era_colors !! (1 + (fromIntegral $ abs i) `mod` (length era_colors - 1))))
       _ -> id
+
+prettyCCS :: GenCCSPayload CCSPtr CCPayload -> Text
+prettyCCS Debug.CCSPayload{ccsCc = cc} = prettyCC cc
+
+prettyCC :: CCPayload -> Text
+prettyCC Debug.CCPayload{..} =
+  T.pack ccLabel <> "   " <> T.pack ccMod <> "   " <> T.pack ccLoc
 
 completeClosureDetails :: Debuggee -> (Text, DebugClosure CCSPtr SrtCont PayloadCont ConstrDescCont StackCont ClosurePtr)
                                             -> IO ClosureDetails
@@ -541,6 +574,8 @@ getClosureDetails :: Debuggee
 getClosureDetails debuggee' t (ListOnlyInfo info_ptr) = do
   info' <- getInfoInfo debuggee' t info_ptr
   return $ InfoDetails info'
+getClosureDetails _ plabel (ListCCS ccs payload) = return $ CCSDetails plabel ccs payload
+getClosureDetails _ plabel (ListCC cc) = return $ CCDetails plabel cc
 getClosureDetails _ t ListData = return $ LabelNode t
 getClosureDetails debuggee' label' (ListFullClosure c) = do
   let excSize' = closureExclusiveSize c
@@ -867,7 +902,8 @@ mkRetainerTree dbg stacks = do
         cs <- getChildren dbg' dc'
         results' <- liftIO $ mapM (\(l, c) -> getClosureDetails dbg' l (ListFullClosure c)) results
         return (cs ++ results')
-      lookup_c _ _ = return []
+      -- And if it's not a closure, just do the normal thing
+      lookup_c dbg' dc' = getChildren dbg' dc'
 
   mkIOTree dbg roots lookup_c renderInlineClosureDesc id
 

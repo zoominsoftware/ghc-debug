@@ -110,7 +110,7 @@ data InfoInfo = InfoInfo
   , _closureType :: Maybe Text
   , _constructor :: Maybe Text
   , _profHeaderInfo :: !(Maybe ProfHeaderWord)
-  }
+  } deriving Show
 
 data ClosureDetails = ClosureDetails
   { _closure :: DebugClosure CCSPtr SrtCont PayloadCont ConstrDesc StackCont ClosurePtr
@@ -118,7 +118,9 @@ data ClosureDetails = ClosureDetails
   , _info :: InfoInfo
   }
   | InfoDetails { _info :: InfoInfo }
-  | LabelNode { _label :: Text }
+  | CCSDetails Text CCSPtr (GenCCSPayload CCSPtr CCPayload)
+  | CCDetails Text CCPayload
+  | LabelNode { _label :: Text } deriving Show
 
 data TreeMode = SavedAndGCRoots (ClosureDetails -> Widget Name)
               | Retainer (ClosureDetails -> Widget Name) (IOTree (ClosureDetails) Name)
