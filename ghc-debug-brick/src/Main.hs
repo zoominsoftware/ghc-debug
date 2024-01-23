@@ -20,10 +20,10 @@ import Brick
 import Brick.BChan
 import Brick.Forms
 import Brick.Widgets.Border
-import Brick.Widgets.Center (centerLayer, hCenter, vCenter)
+import Brick.Widgets.Center (centerLayer, hCenter)
 import Brick.Widgets.List
 import Control.Applicative
-import Control.Monad (forever, forM, when)
+import Control.Monad (forever, forM)
 import Control.Monad.IO.Class
 import Control.Monad.Catch (bracket)
 import Control.Concurrent
@@ -95,7 +95,7 @@ myAppDraw (AppState majorState' _) =
         , withAttr menuAttr $ vLimit 1 $ hBox [txt "(p): Pause | (ESC): Exit", fill ' ']
         ]]
 
-      (PausedMode os@(OperationalState _ treeMode' kbmode fmode _ _ _ _ filters)) -> let
+      (PausedMode os@(OperationalState _ treeMode' kbmode fmode _ _ _ _ rfilters)) -> let
         in kbOverlay kbmode
           $ [mainBorder ("ghc-debug - Paused - " <> socketName socket) $ vBox
           [ -- Current closure details
@@ -103,7 +103,7 @@ myAppDraw (AppState majorState' _) =
               (vLimit 9 $
                 pauseModeTree (\r io -> maybe emptyWidget r (ioTreeSelection io)) os
                 <=> fill ' '))
-              <+> (filterWindow filters)
+              <+> (filterWindow rfilters)
           , -- Tree
             joinBorders $ borderWithLabel
               (txt $ case treeMode' of
@@ -185,12 +185,12 @@ renderInfoInfo info' =
   where
     profHeaderInfo = case _profHeaderInfo info' of
       Just x ->
-        let label = case x of
+        let plabel = case x of
               Debug.RetainerHeader{} -> "Retainer info"
               Debug.LDVWord{} -> "LDV info"
               Debug.EraWord{} -> "Era"
               Debug.OtherHeader{} -> "Other"
-        in [labelled label $ vLimit 1 (str $ show x)]
+        in [labelled plabel $ vLimit 1 (str $ show x)]
       Nothing -> []
 
 renderSourceInformation :: SourceInformation -> [Widget Name]
@@ -248,8 +248,8 @@ renderCCPayload Debug.CCPayload{..} =
 
 
 footer :: Int -> Maybe Int -> FooterMode -> Widget Name
-footer n m mode = vLimit 1 $
- case mode of
+footer n m fmode = vLimit 1 $
+ case fmode of
    FooterMessage t -> withAttr menuAttr $ hBox [txt t, fill ' ']
    FooterInfo -> withAttr menuAttr $ hBox $ [padRight Max $ txt "(↑↓): select item | (→): expand | (←): collapse | (^p): command picker | (^n): invert filter | (?): full keybindings"]
                                          ++ [padLeft (Pad 1) $ txt $
@@ -438,9 +438,9 @@ mkIOTree :: Debuggee
 -- -> IO [(String, ListItem SrtCont PayloadCont ConstrDesc StackCont ClosurePtr)])
          -> ([a] -> [a])
          -> IOTree a Name
-mkIOTree debuggee' cs getChildren renderNode sort = ioTree Connected_Paused_ClosureTree
+mkIOTree debuggee' cs getChildrenGen renderNode sort = ioTree Connected_Paused_ClosureTree
         (sort cs)
-        (\c -> sort <$> getChildren debuggee' c
+        (\c -> sort <$> getChildrenGen debuggee' c
 --            cDets <- mapM (\(lbl, child) -> getClosureDetails debuggee' manalysis (pack lbl) child) children
 --            return (sort cDets)
         )
@@ -535,10 +535,10 @@ renderInlineClosureDesc :: ClosureDetails -> [Widget n]
 renderInlineClosureDesc (LabelNode t) = [txtLabel t]
 renderInlineClosureDesc (InfoDetails info') =
   [txtLabel (_labelInParent info'), txt "   ", txt (_pretty info')]
-renderInlineClosureDesc (CCSDetails label _cptr ccspayload) =
-  [ txtLabel label, txt "   ", txt (prettyCCS ccspayload)]
-renderInlineClosureDesc (CCDetails label cc) =
-  [ txtLabel label, txt "   ", txt (prettyCC cc)]
+renderInlineClosureDesc (CCSDetails clabel _cptr ccspayload) =
+  [ txtLabel clabel, txt "   ", txt (prettyCCS ccspayload)]
+renderInlineClosureDesc (CCDetails clabel cc) =
+  [ txtLabel clabel, txt "   ", txt (prettyCC cc)]
 renderInlineClosureDesc closureDesc@(ClosureDetails{}) =
                     [ txtLabel (_labelInParent (_info closureDesc))
                     , txt "   "
@@ -797,11 +797,11 @@ arrWordsAction dbg = do
           cs' <- run dbg $ forM (S.toList cs) $ \c -> do
             c' <- GD.dereferenceClosure c
             return $ ListFullClosure $ Closure c c'
-          children' <- traverse (traverse (fillListItem d)) $ zipWith (\n c -> (show n, c)) [0..] cs'
+          children' <- traverse (traverse (fillListItem d)) $ zipWith (\n c -> (show @Int n, c)) [0..] cs'
           mapM (\(lbl, child) -> FieldLine <$> getClosureDetails d (pack lbl) child) children'
         g_children d (FieldLine c) = map FieldLine <$> getChildren d c
 
-        renderHeaderPane (CountLine b k) = txtWrap (T.pack (show b))
+        renderHeaderPane (CountLine b _) = txtWrap (T.pack (show b))
         renderHeaderPane (FieldLine c) = renderClosureDetails c
 
         tree = mkIOTree dbg top_closure g_children renderArrWordsLines id
@@ -813,8 +813,8 @@ arrWordsAction dbg = do
 searchWithCurrentFilters :: Debuggee -> EventM n OperationalState ()
 searchWithCurrentFilters dbg = do
   os <- get
-  let filter = uiFiltersToFilter (_filters os)
-  asyncAction "Searching for closures" os (liftIO $ retainersOf (_resultSize os) filter Nothing dbg) $ \cps -> do
+  let rfilter = uiFiltersToFilter (_filters os)
+  asyncAction "Searching for closures" os (liftIO $ retainersOf (_resultSize os) rfilter Nothing dbg) $ \cps -> do
     let cps' = map (zipWith (\n cp -> (T.pack (show n),cp)) [0 :: Int ..]) cps
     res <- liftIO $ mapM (mapM (completeClosureDetails dbg)) cps'
     let tree = mkRetainerTree dbg res
@@ -823,10 +823,10 @@ searchWithCurrentFilters dbg = do
         )
 
 filterOrRun :: Debuggee -> Form Text () Name -> Bool -> (String -> Maybe a) -> (a -> [UIFilter]) -> EventM n OperationalState ()
-filterOrRun dbg form run parse createFilter = do
+filterOrRun dbg form doRun parse createFilter = do
   case parse (T.unpack (formState form)) of
     Just x
-      | run -> do
+      | doRun -> do
         modify $ setFilters (createFilter x)
         searchWithCurrentFilters dbg
       | otherwise -> modify $ (resetFooter . addFilters (createFilter x))
@@ -837,12 +837,12 @@ dispatchFooterInput :: Debuggee
                     -> FooterInputMode
                     -> Form Text () Name
                     -> EventM n OperationalState ()
-dispatchFooterInput dbg (FClosureAddress run invert) form   = filterOrRun dbg form run readClosurePtr (pure . UIAddressFilter invert)
-dispatchFooterInput dbg (FInfoTableAddress run invert) form = filterOrRun dbg form run readInfoTablePtr (pure . UIInfoAddressFilter invert)
-dispatchFooterInput dbg (FConstructorName run invert) form  = filterOrRun dbg form run Just (pure . UIConstructorFilter invert)
-dispatchFooterInput dbg (FClosureName run invert) form      = filterOrRun dbg form run Just (pure . UIInfoNameFilter invert)
+dispatchFooterInput dbg (FClosureAddress runf invert) form   = filterOrRun dbg form runf readClosurePtr (pure . UIAddressFilter invert)
+dispatchFooterInput dbg (FInfoTableAddress runf invert) form = filterOrRun dbg form runf readInfoTablePtr (pure . UIInfoAddressFilter invert)
+dispatchFooterInput dbg (FConstructorName runf invert) form  = filterOrRun dbg form runf Just (pure . UIConstructorFilter invert)
+dispatchFooterInput dbg (FClosureName runf invert) form      = filterOrRun dbg form runf Just (pure . UIInfoNameFilter invert)
 dispatchFooterInput dbg FArrWordsSize form                  = filterOrRun dbg form True readMaybe (\size -> [UIClosureTypeFilter False Debug.ARR_WORDS, UISizeFilter False size])
-dispatchFooterInput dbg (FFilterEras run invert) form       = filterOrRun dbg form run (parseEraRange . T.pack) (pure . UIEraFilter invert)
+dispatchFooterInput dbg (FFilterEras runf invert) form       = filterOrRun dbg form runf (parseEraRange . T.pack) (pure . UIEraFilter invert)
 dispatchFooterInput dbg (FFilterClosureSize invert) form = filterOrRun dbg form False readMaybe (pure . UISizeFilter invert)
 dispatchFooterInput dbg (FFilterClosureType invert) form = filterOrRun dbg form False readMaybe (pure . UIClosureTypeFilter invert)
 dispatchFooterInput dbg FProfile form = do
@@ -852,7 +852,7 @@ dispatchFooterInput _ FDumpArrWords form = do
    os <- get
    let act node = asyncAction_ "dumping ARR_WORDS payload" os $
         case node of
-          Just ClosureDetails{_closure = Closure{_closureSized = Debug.unDCS -> Debug.ArrWordsClosure{..}}} ->
+          Just ClosureDetails{_closure = Closure{_closureSized = Debug.unDCS -> Debug.ArrWordsClosure{bytes, arrWords}}} ->
               BS.writeFile (T.unpack $ formState form) $ arrWordsBS (take (fromIntegral bytes) arrWords)
           _ -> pure ()
    case view treeMode os of
