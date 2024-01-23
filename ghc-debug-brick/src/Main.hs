@@ -198,7 +198,7 @@ renderInfoInfo info' =
       case pinfo of
         Debug.RetainerHeader {} -> pack (show pinfo) -- This should never be visible
         Debug.LDVWord {state, creationTime, lastUseTime} ->
-          (if state then "✓" else "✘") <> " created: " <> pack (show creationTime) <> " last used: " <> pack (show lastUseTime)
+          (if state then "✓" else "✘") <> " created: " <> pack (show creationTime) <> (if state then " last used: " <> pack (show lastUseTime) else "")
         Debug.EraWord era -> pack (show era)
         Debug.OtherHeader other -> "Not supported: " <> pack (show other)
 
@@ -559,6 +559,11 @@ renderInlineClosureDesc closureDesc@(ClosureDetails{}) =
     colorId = _profHeaderInfo $ _info closureDesc
     colorEra = case colorId of
       Just (Debug.EraWord i) -> modifyDefAttr (flip Vty.withBackColor (era_colors !! (1 + (fromIntegral $ abs i) `mod` (length era_colors - 1))))
+      Just (Debug.LDVWord {state}) -> case state of
+                                        -- Used
+                                        True -> modifyDefAttr (flip Vty.withBackColor Vty.green)
+                                        -- Unused
+                                        False -> id
       _ -> id
 
 prettyCCS :: GenCCSPayload CCSPtr CCPayload -> Text
