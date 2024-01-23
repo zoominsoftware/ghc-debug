@@ -60,7 +60,7 @@ getResponseBinary RequestCCS {}  = getMaybe getCCS
 getResponseBinary RequestCC {}  = getCC
 
 putResponseBinary :: Request a -> a -> Put
-putResponseBinary RequestVersion (Version w1 w2 prof tntc) = put w1 >> put w2 >> putProfilingMode prof >> put tntc
+putResponseBinary RequestVersion (Version w1 w2 vprof tntc) = put w1 >> put w2 >> putProfilingMode vprof >> put tntc
 putResponseBinary (RequestPause {}) w  = put w
 putResponseBinary RequestResume w      = put w
 putResponseBinary RequestRoots  rs     = put rs
@@ -79,7 +79,7 @@ putResponseBinary RequestCCS{} r = putMaybe putCCS r
 putResponseBinary RequestCC{} r = putCC r
 
 putMaybe :: (a -> Put) -> Maybe a -> Put
-putMaybe f Nothing  = putWord8 0
+putMaybe _ Nothing  = putWord8 0
 putMaybe f (Just x) = putWord8 1 <> f x
 
 getMaybe :: Get a -> Get (Maybe a)

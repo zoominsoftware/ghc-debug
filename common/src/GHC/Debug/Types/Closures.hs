@@ -167,7 +167,7 @@ data StgInfoTable = StgInfoTable {
    ptrs   :: HalfWord,
    nptrs  :: HalfWord,
    tipe   :: ClosureType,
-   srtlen :: HalfWord 
+   srtlen :: HalfWord
   } deriving (Eq, Show, Generic)
 
 data WhatNext
@@ -715,23 +715,23 @@ instance Hextraversable DebugClosure where
       FunClosure a1 ph srt_p bs ws -> (\ph1 srt' cs -> FunClosure a1 ph1 srt' cs ws) <$> (traverse . traverse) fccs ph <*> srt srt_p <*> traverse g bs
       ThunkClosure a1 ph srt_p bs ws -> (\ph1 srt' cs -> ThunkClosure a1 ph1 srt' cs ws) <$> (traverse . traverse) fccs ph <*> srt srt_p <*> traverse g bs
       SelectorClosure a1 ph b  -> SelectorClosure a1 <$> (traverse . traverse) fccs ph <*> g b
-      PAPClosure a1 a2 a3 a4 a5 a6 -> (\a2 -> PAPClosure a1 a2 a3 a4) <$> (traverse . traverse) fccs a2 <*> g a5 <*> p a6
-      APClosure a1 a2 a3 a4 a5 a6 -> (\a2 -> APClosure a1 a2 a3 a4) <$> (traverse . traverse) fccs a2 <*> g a5 <*> p a6
-      APStackClosure a1 ph s b bs   -> (\ph -> APStackClosure a1 ph s) <$> (traverse . traverse) fccs ph <*> g b <*> f bs
+      PAPClosure a1 a2 a3 a4 a5 a6 -> (\b2 -> PAPClosure a1 b2 a3 a4) <$> (traverse . traverse) fccs a2 <*> g a5 <*> p a6
+      APClosure a1 a2 a3 a4 a5 a6 -> (\b2 -> APClosure a1 b2 a3 a4) <$> (traverse . traverse) fccs a2 <*> g a5 <*> p a6
+      APStackClosure a1 ph s b bs   -> (\ph2 -> APStackClosure a1 ph2 s) <$> (traverse . traverse) fccs ph <*> g b <*> f bs
       IndClosure a1 ph b -> IndClosure a1 <$> (traverse . traverse) fccs ph <*> g b
       BCOClosure a1 ph b1 b2 b3 a2 a3 a4 ->
-        (\ph c1 c2 c3 -> BCOClosure a1 ph c1 c2 c3 a2 a3 a4) <$> (traverse . traverse) fccs ph <*> g b1 <*> g b2 <*> g b3
+        (\ph2 c1 c2 c3 -> BCOClosure a1 ph2 c1 c2 c3 a2 a3 a4) <$> (traverse . traverse) fccs ph <*> g b1 <*> g b2 <*> g b3
       BlackholeClosure a1 ph b -> BlackholeClosure a1 <$> (traverse . traverse) fccs ph <*> g b
-      ArrWordsClosure a1 ph a2 a3 -> (\ph -> ArrWordsClosure a1 ph a2 a3) <$> (traverse . traverse) fccs ph
-      MutArrClosure a1 ph a2 a3 bs -> (\ph -> MutArrClosure a1 ph a2 a3) <$> (traverse . traverse) fccs ph <*> traverse g bs
-      SmallMutArrClosure a1 ph a2 bs -> (\ph -> SmallMutArrClosure a1 ph a2) <$> (traverse . traverse) fccs ph <*> traverse g bs
+      ArrWordsClosure a1 ph a2 a3 -> (\ph2 -> ArrWordsClosure a1 ph2 a2 a3) <$> (traverse . traverse) fccs ph
+      MutArrClosure a1 ph a2 a3 bs -> (\ph2 -> MutArrClosure a1 ph2 a2 a3) <$> (traverse . traverse) fccs ph <*> traverse g bs
+      SmallMutArrClosure a1 ph a2 bs -> (\ph2 -> SmallMutArrClosure a1 ph2 a2) <$> (traverse . traverse) fccs ph <*> traverse g bs
       MVarClosure a1 ph b1 b2 b3     -> MVarClosure a1 <$> (traverse . traverse) fccs ph <*> g b1 <*> g b2 <*> g b3
       MutVarClosure a1 ph b -> MutVarClosure a1 <$> (traverse . traverse) fccs ph <*> g b
       BlockingQueueClosure a1 ph b1 b2 b3 b4 ->
         BlockingQueueClosure a1 <$> (traverse . traverse) fccs ph <*> g b1 <*> g b2 <*> g b3 <*> g b4
       TSOClosure a1 ph b1 b2 b3 b4 b5 b6 b7 a2 a3 a4 a5 a6 a7 a8 a9 a10 ->
-        (\ph c1 c2 c3 c4 c5 c6 c7 -> TSOClosure a1 ph c1 c2 c3 c4 c5 c6 c7 a2 a3 a4 a5 a6 a7 a8 a9 a10) <$> (traverse . traverse) fccs ph <*> g b1 <*> g b2 <*> g b3 <*> g b4 <*> g b5 <*> g b6 <*> traverse g b7
-      StackClosure a1 ph a2 a3 a4 a5 -> (\ph -> StackClosure a1 ph a2 a3 a4) <$> (traverse . traverse) fccs ph <*> f a5
+        (\ph2 c1 c2 c3 c4 c5 c6 c7 -> TSOClosure a1 ph2 c1 c2 c3 c4 c5 c6 c7 a2 a3 a4 a5 a6 a7 a8 a9 a10) <$> (traverse . traverse) fccs ph <*> g b1 <*> g b2 <*> g b3 <*> g b4 <*> g b5 <*> g b6 <*> traverse g b7
+      StackClosure a1 ph a2 a3 a4 a5 -> (\ph2 -> StackClosure a1 ph2 a2 a3 a4) <$> (traverse . traverse) fccs ph <*> f a5
       WeakClosure a1 ph a2 a3 a4 a5 a6 ->
         WeakClosure a1 <$> (traverse . traverse) fccs ph <*> g a2 <*> g a3 <*> g a4 <*> g a5 <*> traverse g a6
       TVarClosure a1 ph a2 a3 a4 ->

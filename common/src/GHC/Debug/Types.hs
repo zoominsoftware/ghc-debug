@@ -59,7 +59,6 @@ import GHC.Debug.Types.Closures as T
 import GHC.Debug.Types.Ptr as T
 import GHC.Debug.Types.Version
 import GHC.Debug.Utils
-import GHC.Debug.Decode
 import Control.Concurrent
 
 -- | The decision about whether to fork the running process or
@@ -396,7 +395,7 @@ getResponse RequestPause {}      = get
 getResponse RequestResume        = get
 getResponse RequestRoots         = many get
 getResponse (RequestClosure {}) = get
-getResponse (RequestInfoTable itbp) = getInfoTable
+getResponse (RequestInfoTable {}) = getInfoTable
 getResponse (RequestSRT {}) = do
   cptr <- get
   pure $ guard (cptr /= UntaggedClosurePtr 0) $> cptr

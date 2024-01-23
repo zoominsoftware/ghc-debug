@@ -219,9 +219,6 @@ ceilIntDiv a b = (a + b - 1) `div` b
 tsoVersionChanged :: Version -> Bool
 tsoVersionChanged (Version majv minv _ _) = (majv > 905) || (majv == 905 && minv >= 20220925)
 
-weakNotNull :: Version -> Bool
-weakNotNull (Version majv minv _ _) = (majv > 904) || (majv == 904 && minv >= 2)
-
 decodeTSO :: Version
           -> (StgInfoTableWithPtr, RawInfoTable)
           -> (a, RawClosure)
@@ -300,9 +297,6 @@ parseTsoFlags w =
 
 decodeClosure :: Version -> (StgInfoTableWithPtr, RawInfoTable) -> (ClosurePtr, RawClosure) -> SizedClosure
 decodeClosure ver i@(itb, _) c
-  -- MP: It was far easier to implement the decoding of these closures in
-  -- ghc-heap using binary rather than patching GHC and going through that
-  -- dance.
   = case tipe (decodedTable itb) of
       ARR_WORDS -> decodeArrWords ver i c
       PAP -> decodePAPClosure ver i c
@@ -413,9 +407,7 @@ decodeInfoTable :: Version -> RawInfoTable -> StgInfoTable
 decodeInfoTable ver@Version{..} (RawInfoTable itbl) =
   case runGetOrFail itParser (BSL.fromStrict itbl) of
     Left err -> error ("DEC:" ++ show err ++ printBS itbl)
-    Right (_rem, o, v) ->
-      let !s = fromIntegral o
-      in v
+    Right (_rem, !_, v) -> v
   where
     itParser = do
       _entry <- case v_tntc of
@@ -506,4 +498,5 @@ decodeInfoTableType i = case i of
   63 -> COMPACT_NFDATA
   64 -> CONTINUATION
   65 -> N_CLOSURE_TYPES
+  n  -> error $ "Unexpected closure type: " ++ show n
 

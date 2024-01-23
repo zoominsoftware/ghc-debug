@@ -237,10 +237,10 @@ snapshot dbg fp = do
   GD.run dbg $ GD.snapshot (dir </> fp)
 
 retainersOf :: Maybe Int -> ClosureFilter -> Maybe [ClosurePtr] -> Debuggee -> IO [[Closure]]
-retainersOf n filter mroots dbg = do
+retainersOf n retainer_filter mroots dbg = do
   run dbg $ do
     roots <- maybe GD.gcRoots return mroots
-    stack <- GD.findRetainers n filter roots
+    stack <- GD.findRetainers n retainer_filter roots
     traverse (\cs -> zipWith Closure cs <$> (GD.dereferenceClosures cs)) stack
 
 arrWordsAnalysis :: Maybe [ClosurePtr] -> Debuggee -> IO (Map.Map BS.ByteString (Set.Set ClosurePtr))
@@ -307,7 +307,7 @@ dereferencePtr dbg (CCSP ccsp) = run dbg (CCS <$> pure ccsp <*> go)
 instance Hextraversable DebugClosure where
   hextraverse p f g h i j (Closure cp c) = Closure cp <$> hextraverse p f g h i j c
   hextraverse _ p _ _ _ h (Stack sp s) = Stack sp <$> bitraverse p h s
-  hextraverse p _ _ _ _ _ (CCS sp s) = pure $ CCS sp s
+  hextraverse _ _ _ _ _ _ (CCS sp s) = pure $ CCS sp s
 
 closureShowAddress :: DebugClosure ccs srt p cd s c -> String
 closureShowAddress (Closure c _) = show c
@@ -383,7 +383,7 @@ closureReferences e (Closure _ closure) = run e $ do
                              wrapStack
                              wrapCCS
                              (unDCS closure')
-closureReferences e (CCS _ Nothing) = pure []
+closureReferences _ (CCS _ Nothing) = pure []
 closureReferences e (CCS _ (Just ccs)) = do
   case ccsPrevStack ccs of
     Nothing -> pure []

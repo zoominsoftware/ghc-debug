@@ -36,7 +36,6 @@ import Lib
 import IOTree
 import Control.Concurrent
 import qualified Graphics.Vty as Vty
-import Data.Word
 
 data Event
   = PollTick  -- Used to perform arbitrary polling based tasks e.g. looking for new debuggees

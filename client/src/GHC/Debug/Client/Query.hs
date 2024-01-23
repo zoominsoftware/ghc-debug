@@ -212,8 +212,8 @@ dereferenceInfoTable :: InfoTablePtr -> DebugM StgInfoTable
 dereferenceInfoTable it = do
   rit <- request (RequestInfoTable it)
   ver <- version
-  let !it = D.decodeInfoTable ver rit
-  pure it
+  let !decoded_it = D.decodeInfoTable ver rit
+  pure decoded_it
 
 dereferenceSRT :: InfoTablePtr -> DebugM SrtPayload
 dereferenceSRT it = GenSrtPayload <$> request (RequestSRT it)
