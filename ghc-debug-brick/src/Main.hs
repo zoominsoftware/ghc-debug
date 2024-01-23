@@ -190,8 +190,17 @@ renderInfoInfo info' =
               Debug.LDVWord{} -> "LDV info"
               Debug.EraWord{} -> "Era"
               Debug.OtherHeader{} -> "Other"
-        in [labelled plabel $ vLimit 1 (str $ show x)]
+        in [labelled plabel $ vLimit 1 (txt $ renderProfHeaderInline x)]
       Nothing -> []
+
+    renderProfHeaderInline :: ProfHeaderWord -> Text
+    renderProfHeaderInline pinfo =
+      case pinfo of
+        Debug.RetainerHeader {} -> pack (show pinfo) -- This should never be visible
+        Debug.LDVWord {state, creationTime, lastUseTime} ->
+          (if state then "✓" else "✘") <> " created: " <> pack (show creationTime) <> " last used: " <> pack (show lastUseTime)
+        Debug.EraWord era -> pack (show era)
+        Debug.OtherHeader other -> "Not supported: " <> pack (show other)
 
 renderSourceInformation :: SourceInformation -> [Widget Name]
 renderSourceInformation (SourceInformation name cty ty label' modu loc) =
