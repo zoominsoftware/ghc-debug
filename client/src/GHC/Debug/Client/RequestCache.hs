@@ -56,7 +56,7 @@ getResponseBinary RequestSavedObjects  = get
 getResponseBinary (RequestSourceInfo _c) = getIPE
 getResponseBinary RequestAllBlocks = get
 getResponseBinary RequestBlock {}  = get
-getResponseBinary RequestCCS {}  = getMaybe getCCS
+getResponseBinary RequestCCS {}  = getCCS
 getResponseBinary RequestCC {}  = getCC
 
 putResponseBinary :: Request a -> a -> Put
@@ -75,19 +75,8 @@ putResponseBinary RequestSavedObjects os = putList os
 putResponseBinary (RequestSourceInfo _c) ipe = putIPE ipe
 putResponseBinary RequestAllBlocks rs = put rs
 putResponseBinary RequestBlock {} r = put r
-putResponseBinary RequestCCS{} r = putMaybe putCCS r
+putResponseBinary RequestCCS{} r = putCCS r
 putResponseBinary RequestCC{} r = putCC r
-
-putMaybe :: (a -> Put) -> Maybe a -> Put
-putMaybe _ Nothing  = putWord8 0
-putMaybe f (Just x) = putWord8 1 <> f x
-
-getMaybe :: Get a -> Get (Maybe a)
-getMaybe f = do
-    w <- getWord8
-    case w of
-        0 -> return Nothing
-        _ -> liftM Just f
 
 putConstrDescCache :: ConstrDesc -> Put
 putConstrDescCache (ConstrDesc a b c) = do

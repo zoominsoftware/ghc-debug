@@ -281,7 +281,7 @@ data DebugClosure ccs srt p cd s c
     }
   | CCS
     { _ccsPtr :: CCSPtr
-    , _ccPayload :: Maybe (GenCCSPayload CCSPtr CCPayload)
+    , _ccPayload :: GenCCSPayload CCSPtr CCPayload
     }
   deriving Show
 
@@ -299,10 +299,8 @@ dereferencePtr dbg (SP sc) = run dbg (Stack <$> pure sc <*> GD.dereferenceStack 
 dereferencePtr dbg (CCSP ccsp) = run dbg (CCS <$> pure ccsp <*> go)
   where
     go = do
-      mccs <- GD.dereferenceCCS ccsp
-      case mccs of
-        Nothing -> pure Nothing
-        Just ccs -> Just <$> bitraverse pure GD.dereferenceCC ccs
+      ccs <- GD.dereferenceCCS ccsp
+      bitraverse pure GD.dereferenceCC ccs
 
 instance Hextraversable DebugClosure where
   hextraverse p f g h i j (Closure cp c) = Closure cp <$> hextraverse p f g h i j c
@@ -375,21 +373,19 @@ closureReferences e (Closure _ closure) = run e $ do
         return $ ListFullClosure $ Stack sPtr refStack'
       wrapCCS ccsPtr = do
         refCCS <- do
-          GD.dereferenceCCS ccsPtr >>= \case
-            Nothing -> pure Nothing
-            Just ccs -> Just <$> bitraverse pure GD.dereferenceCC ccs
+          GD.dereferenceCCS ccsPtr >>= \ccs ->
+            bitraverse pure GD.dereferenceCC ccs
         return $ ListFullClosure $ CCS ccsPtr refCCS
   closureReferencesAndLabels wrapClosure
                              wrapStack
                              wrapCCS
                              (unDCS closure')
-closureReferences _ (CCS _ Nothing) = pure []
-closureReferences e (CCS _ (Just ccs)) = do
+closureReferences e (CCS _ ccs) = do
   case ccsPrevStack ccs of
     Nothing -> pure []
     Just ccsPtr -> run e $ do
       child' <- GD.dereferenceCCS ccsPtr
-      child <- traverse (bitraverse pure GD.dereferenceCC) child'
+      child <- bitraverse pure GD.dereferenceCC child'
       pure [("child",ListFullClosure $ CCS ccsPtr child)]
 
 reverseClosureReferences :: HG.HeapGraph Size
@@ -428,7 +424,7 @@ fillConstrDesc e closure = do
 
 -- | Pretty print a closure
 closurePretty :: Debuggee -> DebugClosure CCSPtr InfoTablePtr PayloadCont ConstrDesc s ClosurePtr ->  IO String
-closurePretty _ (CCS _ ccs) = return $ (show $ fmap ccsCc ccs)
+closurePretty _ (CCS _ ccs) = return $ (show $ ccsCc ccs)
 closurePretty _ (Stack _ frames) = return $ (show (length frames) ++ " frames")
 closurePretty dbg (Closure _ closure) = run dbg $  do
   closure' <- hextraverse pure GD.dereferenceSRT GD.dereferencePapPayload pure pure pure closure

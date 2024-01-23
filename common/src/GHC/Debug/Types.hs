@@ -121,7 +121,7 @@ data Request a where
     RequestBlock :: ClosurePtr -> Request RawBlock
 
     -- | Request the cost center stack
-    RequestCCS :: CCSPtr -> Request (Maybe CCSPayload)
+    RequestCCS :: CCSPtr -> Request CCSPayload
     -- | Request the cost center entry
     RequestCC :: CCPtr -> Request CCPayload
 
@@ -410,9 +410,8 @@ getResponse RequestSavedObjects  = many get
 getResponse (RequestSourceInfo _c) = getIPE
 getResponse RequestAllBlocks = many get
 getResponse RequestBlock {}  = get
-getResponse (RequestCCS cptr)
-  | cptr == CCSPtr 0 = pure Nothing
-  | otherwise = Just <$> getCCS
+getResponse (RequestCCS {}) = getCCS
+
 getResponse (RequestCC {}) = getCC
 
 getProfilingMode :: Get (Maybe ProfilingMode)

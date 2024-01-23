@@ -156,9 +156,9 @@ workerThread n k worker_active ref go oc = DebugM $ do
       conDescTrace k cd
 
     goCCS p = do
-      ccs <- dereferenceCCS p
-      traverse (ccsTrace k) ccs
-      () <$ traverse (bitraverse goCCS goCC) ccs
+      ccs' <- dereferenceCCS p
+      ccsTrace k ccs'
+      () <$ bitraverse goCCS goCC ccs'
 
     goCC p = do
       () <$ dereferenceCC p

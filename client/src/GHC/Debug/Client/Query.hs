@@ -218,7 +218,7 @@ dereferenceInfoTable it = do
 dereferenceSRT :: InfoTablePtr -> DebugM SrtPayload
 dereferenceSRT it = GenSrtPayload <$> request (RequestSRT it)
 
-dereferenceCCS :: CCSPtr -> DebugM (Maybe CCSPayload)
+dereferenceCCS :: CCSPtr -> DebugM CCSPayload
 dereferenceCCS it = request (RequestCCS it)
 
 dereferenceCC :: CCPtr -> DebugM CCPayload
