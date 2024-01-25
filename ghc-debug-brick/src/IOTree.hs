@@ -40,6 +40,7 @@ import qualified Data.List as List
 import           GHC.Stack
 import qualified Graphics.Vty.Input.Events as Vty
 import           Graphics.Vty.Input.Events (Key(..))
+import           Lens.Micro ((^.))
 
 
 -- A tree style list where items can be expanded and collapsed
@@ -113,26 +114,95 @@ nodeToTreeNode :: (node -> IO [node]) -> node -> IOTreeNode node name
 nodeToTreeNode k n = IOTreeNode n (Left (fmap (nodeToTreeNode k) <$> k n))
 
 renderIOTree :: (Show name, Ord name) => IOTree node name -> Widget name
-renderIOTree (IOTree widgetName rs _ renderRow pathTop)
-  = viewport widgetName Vertical $ vBox $ renderTree 0 [] rs pathTop
+renderIOTree iotree
+  = drawTreeElements iotree
+
+data TreeNodeWithRenderContext node = TreeNodeWithRenderContext
+  { _nodeDepth :: Int
+  , _nodeState ::  RowState
+  , _nodeSelected :: Bool
+  , _nodeLast :: RowCtx
+  , _nodeParentLast :: [RowCtx]
+  , _nodeContent :: node
+  }
+
+renderTreeNodeWithContext ::
+  (RowState -> Bool -> RowCtx -> [RowCtx] -> node -> Widget name) ->
+  TreeNodeWithRenderContext node -> Widget name
+renderTreeNodeWithContext rowRenderer ctx =
+  rowRenderer (_nodeState ctx) (_nodeSelected ctx) (_nodeLast ctx) (_nodeParentLast ctx) (_nodeContent ctx)
+
+drawTreeElements :: (Ord n, Show n) => IOTree node n -> Widget n
+drawTreeElements (IOTree widgetName treeNodes _ renderRow pathTop) =
+  -- This function takes inspiration from 'Brick.Widget.List.drawListElements'
+  Widget Greedy Greedy $ do
+    c <- getContext
+
+    -- Take (numPerHeight * 2) elements, or whatever is left
+    let
+      rs = flattenTree 0 [] treeNodes pathTop
+      es = take (numPerHeight * 2) $ drop start rs
+
+      idx = fromMaybe 0 (List.findIndex (_nodeSelected) rs)
+
+      start = max 0 $ idx - numPerHeight + 1
+
+      -- We hardcode the height of each element to be expected as 1 row.
+      -- Perhaps we could greedily compute the number of elements based on
+      -- their dynamic height for a perfect result,
+      -- but it currently feels like overkill.
+      itemHeight = 1
+
+      -- The number of items to show is the available height
+      -- divided by the item height...
+      initialNumPerHeight = (c^.availHeightL) `div` itemHeight
+      -- ... but if the available height leaves a remainder of
+      -- an item height then we need to ensure that we render an
+      -- extra item to show a partial item at the top or bottom to
+      -- give the expected result when an item is more than one
+      -- row high. (Example: 5 rows available with item height
+      -- of 3 yields two items: one fully rendered, the other
+      -- rendered with only its top 2 or bottom 2 rows visible,
+      -- depending on how the viewport state changes.)
+      numPerHeight = initialNumPerHeight +
+                      if initialNumPerHeight * itemHeight == c^.availHeightL
+                      then 0
+                      else 1
+
+      off = start * itemHeight
+
+    render $ viewport widgetName Vertical $
+              translateBy (Location (0, off)) $
+              vBox $ (map (renderTreeNodeWithContext renderRow) es)
   where
-  -- Render the tree of nodes
-  renderTree _ _ [] _ = []
-  renderTree minorIx depth (IOTreeNode node' csE : ns) path = case csE of
-    -- Collapsed
-    Left _ -> row Collapsed : rowsRest
-    -- Expanded
-    Right cs -> row (Expanded (null cs))
-                  : renderTree 0 (rowCtx : depth) cs (if childIsSelected then drop 1 path else [])
-                    ++ rowsRest
-    where
-    childIsSelected = case path of
-      x:_ -> x == minorIx
-      _ -> False
-    selected = path == [minorIx]
-    rowCtx = if null ns then LastRow else NotLastRow
-    row state = (if selected then visible else id) $ renderRow state selected rowCtx depth node'
-    rowsRest = renderTree (minorIx + 1) depth ns path
+    -- Compute metadata for each row we may display.
+    -- This is a logical representation of each row that can
+    -- be split and filtered later.
+    -- Each 'TreeNodeWithRenderContext' can be individually rendered without
+    -- further issue.
+    flattenTree _ _ [] _ = []
+    flattenTree minorIx depth (IOTreeNode node' csE : ns) path = case csE of
+      -- Collapsed
+      Left _ -> row Collapsed : rowsRest
+      -- Expanded
+      Right cs -> row (Expanded (null cs))
+                    : flattenTree 0 (rowCtx : depth) cs (if childIsSelected then drop 1 path else [])
+                      ++ rowsRest
+      where
+      childIsSelected = case path of
+        x:_ -> x == minorIx
+        _ -> False
+      selected = path == [minorIx]
+      rowCtx = if null ns then LastRow else NotLastRow
+      row state = TreeNodeWithRenderContext
+        { _nodeDepth = length depth
+        , _nodeState = state
+        , _nodeSelected = selected
+        , _nodeLast = rowCtx
+        , _nodeParentLast = depth
+        , _nodeContent = node'
+        }
+      rowsRest = flattenTree (minorIx + 1) depth ns path
 
 handleIOTreeEvent :: Vty.Event -> IOTree node name -> EventM name s (IOTree node name)
 handleIOTreeEvent e tree
