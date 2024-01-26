@@ -149,7 +149,7 @@ workerThread n k worker_active ref go oc = DebugM $ do
     gos r a st = do
       st' <- dereferenceStack st
       stackTrace k st'
-      () <$ traverse (goc r . ClosurePtrWithInfo a) st'
+      () <$ bitraverse (gosrt r a) (goc r . ClosurePtrWithInfo a) st'
 
     gocd d = do
       cd <- dereferenceConDesc d
@@ -255,7 +255,7 @@ waitFinish working = atomically (checkDone working)
       -- active work and empty chan)
       if b then checkDone xs else retry
 
--- | A parellel tracing function.
+-- | A parallel tracing function.
 tracePar :: [ClosurePtr] -> DebugM ()
 tracePar = traceParFromM funcs . map (ClosurePtrWithInfo ())
   where
