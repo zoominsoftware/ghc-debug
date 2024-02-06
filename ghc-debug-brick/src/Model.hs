@@ -36,6 +36,11 @@ import Lib
 import IOTree
 import Control.Concurrent
 import qualified Graphics.Vty as Vty
+import Data.Int
+import GHC.Debug.Client.Monad (DebugM)
+import GHC.Debug.CostCentres (findAllChildrenOfCC)
+import GHC.Debug.Client (ccID)
+
 
 data Event
   = PollTick  -- Used to perform arbitrary polling based tasks e.g. looking for new debuggees
@@ -147,6 +152,7 @@ data FooterInputMode = FClosureAddress {runNow :: Bool, invert :: Bool}
                      | FFilterEras {runNow :: Bool, invert :: Bool}
                      | FFilterClosureType {invert :: Bool}
                      | FFilterClosureSize {invert :: Bool}
+                     | FFilterCcId {runNow :: Bool, invert :: Bool}
                      | FProfile
                      | FSnapshot
                      | FDumpArrWords
@@ -175,6 +181,7 @@ invertInput x@FClosureName{invert} = x{invert = not invert}
 invertInput x@FFilterEras{invert} = x{invert = not invert}
 invertInput x@FFilterClosureSize{invert} = x{invert = not invert}
 invertInput x@FFilterClosureType{invert} = x{invert = not invert}
+invertInput x@FFilterCcId{invert} = x{invert = not invert}
 invertInput x = x
 
 formatFooterMode :: FooterInputMode -> Text
@@ -185,6 +192,7 @@ formatFooterMode FClosureName{invert} = (if invert then "!" else "") <> "closure
 formatFooterMode FFilterEras{invert} = (if invert then "!" else "") <> "era range (<era>/<start-era>-<end-era>): "
 formatFooterMode FFilterClosureSize{invert} = (if invert then "!" else "") <> "closure size (bytes): "
 formatFooterMode FFilterClosureType{invert} = (if invert then "!" else "") <> "closure type: "
+formatFooterMode FFilterCcId{invert} = (if invert then "!" else "") <> "CC Id: "
 formatFooterMode FArrWordsSize = "size (bytes)>= "
 formatFooterMode FDumpArrWords = "dump payload to file: "
 formatFooterMode FSetResultSize = "search result limit (0 for infinity): "
@@ -235,18 +243,24 @@ data UIFilter =
   | UIEraFilter Bool EraRange
   | UISizeFilter Bool Size
   | UIClosureTypeFilter Bool ClosureType
+  | UICcId Bool Int64
 
-uiFiltersToFilter :: [UIFilter] -> ClosureFilter
-uiFiltersToFilter = foldr AndFilter (PureFilter True) . map uiFilterToFilter
+uiFiltersToFilter :: [UIFilter] -> DebugM ClosureFilter
+uiFiltersToFilter uifilters = do
+  closFilters <- mapM uiFilterToFilter uifilters
+  pure $ foldr AndFilter (PureFilter True) closFilters
 
-uiFilterToFilter :: UIFilter -> ClosureFilter
-uiFilterToFilter (UIAddressFilter invert x)     = AddressFilter (xor invert . (== x))
-uiFilterToFilter (UIInfoAddressFilter invert x) = InfoPtrFilter (xor invert . (== x))
-uiFilterToFilter (UIConstructorFilter invert x) = ConstructorDescFilter (xor invert . (== x) . name)
-uiFilterToFilter (UIInfoNameFilter invert x)    = InfoSourceFilter (xor invert . (== x) . infoName)
-uiFilterToFilter (UIEraFilter  invert x)        = ProfHeaderFilter (xor invert . (`profHeaderInEraRange` (Just x)))
-uiFilterToFilter (UISizeFilter invert x)        = SizeFilter (xor invert . (>= x))
-uiFilterToFilter (UIClosureTypeFilter invert x) = InfoFilter (xor invert . (== x) . tipe)
+uiFilterToFilter :: UIFilter -> DebugM ClosureFilter
+uiFilterToFilter (UIAddressFilter invert x)     = pure $ AddressFilter (xor invert . (== x))
+uiFilterToFilter (UIInfoAddressFilter invert x) = pure $ InfoPtrFilter (xor invert . (== x))
+uiFilterToFilter (UIConstructorFilter invert x) = pure $ ConstructorDescFilter (xor invert . (== x) . name)
+uiFilterToFilter (UIInfoNameFilter invert x)    = pure $ InfoSourceFilter (xor invert . (== x) . infoName)
+uiFilterToFilter (UIEraFilter  invert x)        = pure $ ProfHeaderFilter (xor invert . (`profHeaderInEraRange` (Just x)))
+uiFilterToFilter (UISizeFilter invert x)        = pure $ SizeFilter (xor invert . (>= x))
+uiFilterToFilter (UIClosureTypeFilter invert x) = pure $ InfoFilter (xor invert . (== x) . tipe)
+uiFilterToFilter (UICcId invert x)      = do
+  ccsPtrs <- findAllChildrenOfCC ((x ==) . ccID)
+  pure $ ProfHeaderFilter (xor invert . (`profHeaderReferencesCCS` ccsPtrs))
 
 xor :: Bool -> Bool -> Bool
 xor False False = False

@@ -7,7 +7,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 module GHC.Debug.Strings ( stringProgram, arrWordsProgram
-                         , arrWordsAnalysis, stringAnalysis) where
+                         , arrWordsAnalysis, stringAnalysis, decodeString) where
 
 import GHC.Debug.Client
 import GHC.Debug.Types.Ptr

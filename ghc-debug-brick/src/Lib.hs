@@ -70,6 +70,7 @@ module Lib
 
     -- * Retainers
   , retainersOf
+  , findAllChildrenOfCCs
 
   -- * Counting
   , arrWordsAnalysis
@@ -92,6 +93,8 @@ module Lib
   , SrtCont
   , ClosurePtr
   , readClosurePtr
+  , CCPtr
+  , readCCPtr
   , HG.StackHI
   , HG.PapHI
   , HG.SrtHI
@@ -102,6 +105,7 @@ module Lib
   , GD.profHeaderInEraRange
   , tipe
   , ClosureFilter(..)
+  , GD.profHeaderReferencesCCS
   ) where
 
 import           Data.List.NonEmpty (NonEmpty(..))
@@ -114,6 +118,7 @@ import qualified GHC.Debug.Client.Monad as GD
 import qualified GHC.Debug.Client.Query as GD
 import qualified GHC.Debug.Profile as GD
 import qualified GHC.Debug.Retainers as GD
+import qualified GHC.Debug.CostCentres as GD
 import           GHC.Debug.Retainers (EraRange(..), ClosureFilter(..))
 import qualified GHC.Debug.Snapshot as GD
 import qualified GHC.Debug.Strings as GD
@@ -127,6 +132,8 @@ import Data.Text (Text, pack)
 import qualified Data.Map as Map
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Set as Set
+import Data.Int
+import GHC.Debug.Client.Monad (DebugM)
 
 initialTraversal :: Debuggee -> IO (HG.HeapGraph Size)
 initialTraversal e = run e $ do
@@ -240,12 +247,18 @@ snapshot dbg fp = do
   createDirectoryIfMissing True dir
   GD.run dbg $ GD.snapshot (dir </> fp)
 
-retainersOf :: Maybe Int -> ClosureFilter -> Maybe [ClosurePtr] -> Debuggee -> IO [[Closure]]
+retainersOf :: Maybe Int -> DebugM ClosureFilter -> Maybe [ClosurePtr] -> Debuggee -> IO [[Closure]]
 retainersOf n retainer_filter mroots dbg = do
   run dbg $ do
     roots <- maybe GD.gcRoots return mroots
-    stack <- GD.findRetainers n retainer_filter roots
+    closfilter <- retainer_filter
+    stack <- GD.findRetainers n closfilter roots
     traverse (\cs -> zipWith Closure cs <$> (GD.dereferenceClosures cs)) stack
+
+findAllChildrenOfCCs :: Int64 -> Debuggee -> IO (Set.Set CCSPtr)
+findAllChildrenOfCCs ccId dbg = do
+  run dbg $ do
+    GD.findAllChildrenOfCC ((ccId ==) . ccID)
 
 arrWordsAnalysis :: Maybe [ClosurePtr] -> Debuggee -> IO (Map.Map BS.ByteString (Set.Set ClosurePtr))
 arrWordsAnalysis mroots dbg = do

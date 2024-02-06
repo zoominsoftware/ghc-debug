@@ -53,16 +53,13 @@ data TraceFunctions m =
       , closTrace :: !(ClosurePtr -> SizedClosure -> m DebugM () -> m DebugM ())
       , visitedVal :: !(ClosurePtr -> (m DebugM) ())
       , conDescTrace :: !(ConstrDesc -> m DebugM ())
-      , ccsTrace :: !(GenCCSPayload CCSPtr CCPtr -> m DebugM ())
+      , ccsTrace :: !(CCSPayload -> m DebugM ())
       }
 
 justClosures :: C m => (ClosurePtr -> SizedClosure -> m DebugM () -> m DebugM ()) -> TraceFunctions m
 justClosures f = TraceFunctions nop nop nop f nop nop nop
   where
     nop = const (return ())
-
-
-
 
 type C m = (MonadTrans m, Monad (m DebugM))
 

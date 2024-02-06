@@ -51,11 +51,13 @@ module GHC.Debug.Client
   , dereferenceClosure
   , dereferenceToClosurePtr
   , addConstrDesc
+  , requestCCSMain
   , dereferenceClosures
   , dereferenceStack
   , dereferencePapPayload
   , dereferenceConDesc
   , dereferenceInfoTable
+  , dereferenceIndexTable
   , dereferenceSRT
   , dereferenceCCS
   , dereferenceCC
@@ -87,6 +89,9 @@ module GHC.Debug.Client
   , StackPtr
   , ClosurePtr
   , InfoTablePtr
+  , CCPtr
+  , CCSPtr
+  , IndexTablePtr
   , HG.StackHI
   , HG.PapHI
   , HG.HeapGraphIndex

@@ -19,6 +19,7 @@ module GHC.Debug.Client.Query
   , allBlocks
   , getSourceInfo
   , savedObjects
+  , requestCCSMain
   , version
 
   -- * Dereferencing functions
@@ -34,7 +35,10 @@ module GHC.Debug.Client.Query
   , dereferenceInfoTable
   , dereferenceSRT
   , dereferenceCCS
+  , dereferenceCCSDirect
   , dereferenceCC
+  , dereferenceIndexTable
+  , dereferenceIndexTableDirect
   ) where
 
 import           Control.Exception
@@ -204,6 +208,9 @@ getSourceInfo = request . RequestSourceInfo
 savedObjects :: DebugM [ClosurePtr]
 savedObjects = request RequestSavedObjects
 
+requestCCSMain :: DebugM CCSPtr
+requestCCSMain = request RequestCCSMainPtr
+
 -- | Query the debuggee for the protocol version
 version :: DebugM Version
 version = request RequestVersion
@@ -218,8 +225,39 @@ dereferenceInfoTable it = do
 dereferenceSRT :: InfoTablePtr -> DebugM SrtPayload
 dereferenceSRT it = GenSrtPayload <$> request (RequestSRT it)
 
+dereferenceCCSDirect :: CCSPtr -> DebugM CCSPayload
+dereferenceCCSDirect it = request (RequestCCS it)
+
 dereferenceCCS :: CCSPtr -> DebugM CCSPayload
-dereferenceCCS it = request (RequestCCS it)
+dereferenceCCS ccsPtr@(CCSPtr w)
+  | not (heapAlloced $ mkClosurePtr w) = dereferenceCCSDirect ccsPtr
+  | otherwise = do
+      rc <- requestBlock (LookupClosure $ mkClosurePtr w)
+      if rawClosureSize rc < 8
+        then do
+          res <- dereferenceCCSDirect ccsPtr
+          traceShowM ("Warning!!: block decoding failed, report this as a bug:" ++ show (ccsPtr, res))
+          return res
+        else do
+          v <- version
+          pure $ D.decodeCCS v rc
 
 dereferenceCC :: CCPtr -> DebugM CCPayload
 dereferenceCC it = request (RequestCC it)
+
+dereferenceIndexTableDirect :: IndexTablePtr -> DebugM IndexTable
+dereferenceIndexTableDirect it = request (RequestIndexTable it)
+
+dereferenceIndexTable :: IndexTablePtr -> DebugM IndexTable
+dereferenceIndexTable idxTablePtr@(IndexTablePtr w)
+  | not (heapAlloced $ mkClosurePtr w) = dereferenceIndexTableDirect idxTablePtr
+  | otherwise = do
+      rc <- requestBlock (LookupClosure $ mkClosurePtr w)
+      if rawClosureSize rc < 8
+        then do
+          res <- dereferenceIndexTableDirect idxTablePtr
+          traceShowM ("Warning!!: block decoding failed, report this as a bug:" ++ show (idxTablePtr, res))
+          return res
+        else do
+          v <- version
+          pure $ D.decodeIndexTable v rc

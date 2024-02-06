@@ -58,6 +58,8 @@ getResponseBinary RequestAllBlocks = get
 getResponseBinary RequestBlock {}  = get
 getResponseBinary RequestCCS {}  = getCCS
 getResponseBinary RequestCC {}  = getCC
+getResponseBinary RequestIndexTable {}  = getIndexTable
+getResponseBinary RequestCCSMainPtr {}  = getCCSMainPtr
 
 putResponseBinary :: Request a -> a -> Put
 putResponseBinary RequestVersion (Version w1 w2 vprof tntc) = put w1 >> put w2 >> putProfilingMode vprof >> put tntc
@@ -77,6 +79,8 @@ putResponseBinary RequestAllBlocks rs = put rs
 putResponseBinary RequestBlock {} r = put r
 putResponseBinary RequestCCS{} r = putCCS r
 putResponseBinary RequestCC{} r = putCC r
+putResponseBinary RequestIndexTable{} r = putIndexTable r
+putResponseBinary RequestCCSMainPtr{} r = putCCSMainPtr r
 
 putConstrDescCache :: ConstrDesc -> Put
 putConstrDescCache (ConstrDesc a b c) = do

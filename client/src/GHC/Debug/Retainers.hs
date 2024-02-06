@@ -15,6 +15,7 @@ module GHC.Debug.Retainers
   , EraRange(..)
   , profHeaderInEraRange
   , ClosureFilter(..)
+  , profHeaderReferencesCCS
   , findRetainersOfEra) where
 
 import Prelude hiding (filter)
@@ -28,9 +29,9 @@ import qualified Data.Set as Set
 import Control.Monad.RWS
 import Data.Word
 
-addOne :: [ClosurePtr] -> (Maybe Int, [[ClosurePtr]]) -> (Maybe Int, [[ClosurePtr]])
+addOne :: a -> (Maybe Int, [a]) -> (Maybe Int, [a])
 addOne _ (Just 0, cp) = (Just 0, cp)
-addOne cp (n, cps)    = (subtract 1 <$> n, cp:cps)
+addOne cp (n, cps)    = (subtract 1 <$> n, cp : cps)
 
 data EraRange
   = EraRange { startEra :: Word64, endEra :: Word64} -- inclusive
@@ -39,6 +40,10 @@ data EraRange
 inEraRange :: Word64 -> Maybe EraRange -> Bool
 inEraRange _ Nothing = True
 inEraRange n (Just (EraRange s e)) = s <= n && n <= e
+
+profHeaderReferencesCCS :: Maybe ProfHeaderWithPtr -> Set.Set CCSPtr -> Bool
+profHeaderReferencesCCS Nothing _ = False
+profHeaderReferencesCCS (Just profHeader) f = ccs profHeader `Set.member` f
 
 profHeaderInEraRange :: Maybe (ProfHeader a) -> Maybe EraRange -> Bool
 profHeaderInEraRange Nothing _ = True

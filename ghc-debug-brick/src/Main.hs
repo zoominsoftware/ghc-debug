@@ -224,6 +224,7 @@ renderUIFilter (UIInfoNameFilter invert x)    = labelled (bool "" "!" invert <> 
 renderUIFilter (UIEraFilter invert  x)        = labelled (bool "" "!" invert <> "Era range") (str (showEraRange x))
 renderUIFilter (UISizeFilter invert x)        = labelled (bool "" "!" invert <> "Size (lower bound)") (str (show $ getSize x))
 renderUIFilter (UIClosureTypeFilter invert x) = labelled (bool "" "!" invert <> "Closure type") (str (show x))
+renderUIFilter (UICcId invert x)              = labelled (bool "" "!" invert <> "CC Id") (str (show x))
 
 
 renderClosureDetails :: ClosureDetails -> Widget Name
@@ -248,6 +249,7 @@ renderClosureDetails (CCDetails _ c) = vLimit 8 $ vBox $ renderCCPayload c
 renderCCPayload :: CCPayload -> [Widget Name]
 renderCCPayload Debug.CCPayload{..} =
   [ labelled "Label" $ vLimit 1 (str ccLabel)
+  , labelled "CC ID" $ vLimit 1 (str $ show ccID)
   , labelled "Module" $ vLimit 1 (str ccMod)
   , labelled "Location" $ vLimit 1 (str ccLoc)
   , labelled "Allocation" $ vLimit 1 (str $ show ccMemAlloc)
@@ -739,6 +741,7 @@ commandList =
   , Command "Add filter for constructor name" Nothing (const $ modify $ footerMode .~ footerInput (FConstructorName False False))
   , Command "Add filter for closure name"     Nothing (const $ modify $ footerMode .~ footerInput (FClosureName False False))
   , Command "Add filter for era"              Nothing (const $ modify $ footerMode .~ footerInput (FFilterEras False False))
+  , Command "Add filter for cost centre id"   Nothing (const $ modify $ footerMode .~ footerInput (FFilterCcId False False))
   , Command "Add filter for closure size"     Nothing (const $ modify $ footerMode .~ footerInput (FFilterClosureSize False))
   , Command "Add filter for closure type"     Nothing (const $ modify $ footerMode .~ footerInput (FFilterClosureType False))
   ]
@@ -827,8 +830,9 @@ arrWordsAction dbg = do
 searchWithCurrentFilters :: Debuggee -> EventM n OperationalState ()
 searchWithCurrentFilters dbg = do
   os <- get
-  let rfilter = uiFiltersToFilter (_filters os)
-  asyncAction "Searching for closures" os (liftIO $ retainersOf (_resultSize os) rfilter Nothing dbg) $ \cps -> do
+  let mClosFilter = uiFiltersToFilter (_filters os)
+  asyncAction "Searching for closures" os (liftIO $ retainersOf (_resultSize os) mClosFilter Nothing dbg) $ \cps -> do
+
     let cps' = map (zipWith (\n cp -> (T.pack (show n),cp)) [0 :: Int ..]) cps
     res <- liftIO $ mapM (mapM (completeClosureDetails dbg)) cps'
     let tree = mkRetainerTree dbg res
@@ -837,13 +841,20 @@ searchWithCurrentFilters dbg = do
         )
 
 filterOrRun :: Debuggee -> Form Text () Name -> Bool -> (String -> Maybe a) -> (a -> [UIFilter]) -> EventM n OperationalState ()
-filterOrRun dbg form doRun parse createFilter = do
+filterOrRun dbg form doRun parse createFilter =
+  filterOrRunM dbg form doRun parse (pure . createFilter)
+
+filterOrRunM :: Debuggee -> Form Text () Name -> Bool -> (String -> Maybe a) -> (a -> EventM n OperationalState [UIFilter]) -> EventM n OperationalState ()
+filterOrRunM dbg form doRun parse createFilterM = do
   case parse (T.unpack (formState form)) of
     Just x
       | doRun -> do
-        modify $ setFilters (createFilter x)
+        newFilter <- createFilterM x
+        modify $ setFilters newFilter
         searchWithCurrentFilters dbg
-      | otherwise -> modify $ (resetFooter . addFilters (createFilter x))
+      | otherwise -> do
+        newFilter <- createFilterM x
+        modify $ (resetFooter . addFilters newFilter)
     Nothing -> modify resetFooter
 
 -- | What happens when we press enter in footer input mode
@@ -859,6 +870,7 @@ dispatchFooterInput dbg FArrWordsSize form                  = filterOrRun dbg fo
 dispatchFooterInput dbg (FFilterEras runf invert) form       = filterOrRun dbg form runf (parseEraRange . T.pack) (pure . UIEraFilter invert)
 dispatchFooterInput dbg (FFilterClosureSize invert) form = filterOrRun dbg form False readMaybe (pure . UISizeFilter invert)
 dispatchFooterInput dbg (FFilterClosureType invert) form = filterOrRun dbg form False readMaybe (pure . UIClosureTypeFilter invert)
+dispatchFooterInput dbg (FFilterCcId invert runf) form = filterOrRun dbg form runf readMaybe (pure . UICcId invert)
 dispatchFooterInput dbg FProfile form = do
    os <- get
    asyncAction_ "Writing profile" os $ profile dbg (T.unpack (formState form))

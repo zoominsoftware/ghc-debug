@@ -36,9 +36,14 @@ module GHC.Debug.Types(module T
                       , getCC
                       , putCCS
                       , putCC
+                      , putIndexTable
+                      , getIndexTable
+                      , putCCSMainPtr
+                      , getCCSMainPtr
                       , getProfilingMode
                       , putProfilingMode
-                      , getRequest ) where
+                      , getRequest
+                      ) where
 
 import Control.Applicative
 import Control.Exception
@@ -124,6 +129,11 @@ data Request a where
     RequestCCS :: CCSPtr -> Request CCSPayload
     -- | Request the cost center entry
     RequestCC :: CCPtr -> Request CCPayload
+    -- | Request the index table.
+    RequestIndexTable :: IndexTablePtr -> Request IndexTable
+    -- | Request the CCS_MAIN pointer
+    RequestCCSMainPtr :: Request CCSPtr
+
 
 data SourceInformation = SourceInformation { infoName        :: !String
                                          , infoClosureType :: !ClosureType
@@ -153,6 +163,8 @@ eq1request r1 r2 =
     RequestBlock cp        -> case r2 of { RequestBlock cp' -> cp == cp'; _ -> False }
     RequestCCS cp       -> case r2 of { RequestCCS cp' -> cp == cp'; _ -> False }
     RequestCC cp       -> case r2 of { RequestCC cp' -> cp == cp'; _ -> False }
+    RequestIndexTable cp -> case r2 of { RequestIndexTable cp' -> cp == cp'; _ -> False }
+    RequestCCSMainPtr -> case r2 of { RequestCCSMainPtr -> True; _ -> False }
 
 -- | Whether a request mutates the debuggee state, don't cache these ones
 isWriteRequest :: Request a -> Bool
@@ -205,6 +217,8 @@ instance Hashable (Request a) where
     RequestBlock cp        -> s `hashWithSalt` cmdRequestBlock `hashWithSalt` cp
     RequestCCS cp          -> s `hashWithSalt` cmdRequestCCS `hashWithSalt` cp
     RequestCC cp           -> s `hashWithSalt` cmdRequestCC  `hashWithSalt` cp
+    RequestIndexTable cp   -> s `hashWithSalt` cmdRequestIndexTable  `hashWithSalt` cp
+    RequestCCSMainPtr      -> s `hashWithSalt` cmdRequestCCSMainPtr
 
 
 newtype CommandId = CommandId Word32
@@ -230,6 +244,8 @@ requestCommandId r = case r of
     RequestBlock {} -> cmdRequestBlock
     RequestCCS{} -> cmdRequestCCS
     RequestCC{} -> cmdRequestCC
+    RequestIndexTable{} -> cmdRequestIndexTable
+    RequestCCSMainPtr{} -> cmdRequestCCSMainPtr
 
 cmdRequestVersion :: CommandId
 cmdRequestVersion = CommandId 1
@@ -282,6 +298,12 @@ cmdRequestCCS  = CommandId 18
 cmdRequestCC :: CommandId
 cmdRequestCC  = CommandId 19
 
+cmdRequestIndexTable :: CommandId
+cmdRequestIndexTable  = CommandId 20
+
+cmdRequestCCSMainPtr :: CommandId
+cmdRequestCCSMainPtr  = CommandId 21
+
 data AnyReq = forall req . AnyReq !(Request req)
 
 instance Hashable AnyReq where
@@ -332,6 +354,8 @@ putRequest (RequestAllBlocks) = putCommand cmdRequestAllBlocks $ return ()
 putRequest (RequestBlock cp)  = putCommand cmdRequestBlock $ put cp
 putRequest (RequestCCS cp)  = putCommand cmdRequestCCS $ put cp
 putRequest (RequestCC cp)  = putCommand cmdRequestCC $ put cp
+putRequest (RequestIndexTable cp)  = putCommand cmdRequestIndexTable $ put cp
+putRequest RequestCCSMainPtr  = putCommand cmdRequestCCSMainPtr mempty
 
 -- This is used to serialise the RequestCache
 getRequest :: Get AnyReq
@@ -386,6 +410,10 @@ getRequest = do
       | cmd == cmdRequestCC -> do
             cp <- get
             return (AnyReq (RequestCC cp))
+      | cmd == cmdRequestIndexTable -> do
+            cp <- get
+            return (AnyReq (RequestIndexTable cp))
+      | cmd == cmdRequestCCSMainPtr -> return (AnyReq RequestCCSMainPtr)
       | otherwise -> error (show cmd)
 
 
@@ -413,6 +441,8 @@ getResponse RequestBlock {}  = get
 getResponse (RequestCCS {}) = getCCS
 
 getResponse (RequestCC {}) = getCC
+getResponse (RequestIndexTable {}) = getIndexTable
+getResponse (RequestCCSMainPtr {}) = getCCSMainPtr
 
 getProfilingMode :: Get (Maybe ProfilingMode)
 getProfilingMode = do
@@ -438,49 +468,47 @@ putProfilingMode (Just mode) =
 
 getCCS :: Get CCSPayload
 getCCS = do
-  len <- fromIntegral <$> getInt16be
-  let go = isolate len $ do
-        ccsID <- getInt64le
-        ccsCc <- get
-        ccsPrevStack <- do
-          p <- get
-          pure $ guard (p /= CCSPtr 0) $>  p
-        ccsIndexTable <- get
-        ccsRoot <- do
-          p <- get
-          pure $ guard (p /= CCSPtr 0) $>  p
-        ccsDepth <- fromIntegral <$> getWord64le
-        ccsSccCount <- getWord64le
-        ccsSelected <- fromIntegral <$> getWord64le
-        ccsTimeTicks <- fromIntegral <$> getWord64le
-        ccsMemAlloc <- getWord64le
-        ccsInheritedAlloc <- getWord64le
-        ccsInheritedTicks <- fromIntegral <$> getWord64le
-        pure CCSPayload{..}
-  go
+  ccsID <- getInt64le
+  ccsCc <- get
+  ccsPrevStack <- do
+    p <- get
+    pure $ guard (p /= CCSPtr 0) $>  p
+  ccsIndexTable <- do
+    p <- get
+    pure $ guard (p /= IndexTablePtr 0) $>  p
+  ccsRoot <- do
+    p <- get
+    pure $ guard (p /= CCSPtr 0) $>  p
+  ccsDepth <- fromIntegral <$> getWord64le
+  ccsSccCount <- getWord64le
+  ccsSelected <- fromIntegral <$> getWord64le
+  ccsTimeTicks <- fromIntegral <$> getWord64le
+  ccsMemAlloc <- getWord64le
+  ccsInheritedAlloc <- getWord64le
+  ccsInheritedTicks <- fromIntegral <$> getWord64le
+  pure CCSPayload{..}
+
 
 putCCS :: CCSPayload -> Put
 putCCS CCSPayload{..} = do
-  putInt16be (fromIntegral $ BSL.length bs)
-  putLazyByteString bs
-  where
-    bs = runPut $ do
-      putInt64le ccsID
-      put ccsCc
-      case ccsPrevStack of
-        Nothing -> put (CCSPtr 0)
-        Just x -> put x
-      put ccsIndexTable
-      case ccsRoot of
-        Nothing -> put (CCSPtr 0)
-        Just x -> put x
-      putWord64le $ fromIntegral ccsDepth
-      putWord64le $ fromIntegral ccsSccCount
-      putWord64le $ fromIntegral ccsSelected
-      putWord64le $ fromIntegral ccsTimeTicks
-      putWord64le $ fromIntegral ccsMemAlloc
-      putWord64le $ fromIntegral ccsInheritedAlloc
-      putWord64le $ fromIntegral ccsInheritedTicks
+  putInt64le ccsID
+  put ccsCc
+  case ccsPrevStack of
+    Nothing -> put (CCSPtr 0)
+    Just x -> put x
+  case ccsIndexTable of
+    Nothing -> put (IndexTablePtr 0)
+    Just x -> put x
+  case ccsRoot of
+    Nothing -> put (CCSPtr 0)
+    Just x -> put x
+  putWord64le $ fromIntegral ccsDepth
+  putWord64le ccsSccCount
+  putWord64le $ fromIntegral ccsSelected
+  putWord64le $ fromIntegral ccsTimeTicks
+  putWord64le ccsMemAlloc
+  putWord64le ccsInheritedAlloc
+  putWord64le $ fromIntegral ccsInheritedTicks
 
 getCC :: Get CCPayload
 getCC = do
@@ -519,6 +547,32 @@ putCC CCPayload{..} = do
       putInt32be (fromIntegral $ length xs)
       putByteString (C8.pack xs)
 
+getIndexTable :: Get IndexTable
+getIndexTable = do
+  itCostCentre <- get
+  itCostCentreStack <- get
+  itNext <- do
+    p <- get
+    pure $ guard (p /= IndexTablePtr 0) $> p
+  itBackEdge <- (\i -> if i == 0 then False else True) <$> getWord8
+  pure IndexTable{..}
+
+putIndexTable :: IndexTable -> Put
+putIndexTable IndexTable {..} = do
+  put itCostCentre
+  put itCostCentreStack
+  case itNext of
+    Nothing -> put (IndexTablePtr 0)
+    Just x -> put x
+  if itBackEdge
+    then putWord8 0
+    else putWord8 1
+
+getCCSMainPtr :: Get CCSPtr
+getCCSMainPtr = get
+
+putCCSMainPtr :: CCSPtr -> Put
+putCCSMainPtr = put
 
 getConstrDesc :: Get ConstrDesc
 getConstrDesc = do

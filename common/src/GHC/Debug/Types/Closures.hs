@@ -65,6 +65,7 @@ module GHC.Debug.Types.Closures (
     , CCSPayload
     , GenCCSPayload(..)
     , CCPayload(..)
+    , IndexTable(..)
 
     -- * Traversing functions
     , Hextraversable(..)
@@ -566,7 +567,7 @@ data GenCCSPayload ccsPtr ccPtr
   { ccsID :: !Int64
   , ccsCc :: ccPtr
   , ccsPrevStack :: Maybe ccsPtr
-  , ccsIndexTable :: Word -- TODO
+  , ccsIndexTable :: Maybe IndexTablePtr
   , ccsRoot :: Maybe CCSPtr -- todo ccsPtr?
   , ccsDepth :: Word
   , ccsSccCount :: Word64
@@ -602,6 +603,14 @@ data CCPayload
   , ccTimeTicks :: Word
   , ccIsCaf :: Bool
   , ccLink :: Maybe CCPtr -- todo ccPtr?
+  } deriving (Show, Ord, Eq)
+
+-- data IndexTable ccsPtr ccPtr = IndexTable
+data IndexTable = IndexTable
+  { itCostCentre :: CCPtr
+  , itCostCentreStack :: CCSPtr
+  , itNext :: Maybe IndexTablePtr
+  , itBackEdge :: Bool
   } deriving (Show, Ord, Eq)
 
 -- | Information needed to decode a set of stack frames

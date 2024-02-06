@@ -18,7 +18,7 @@ import GHC.Debug.Client
 import GHC.Debug.Trace
 import GHC.Debug.Profile
 import GHC.Debug.Types.Graph (ppClosure)
-import GHC.Debug.Types(ClosurePtr(..), CCSPtr)
+import GHC.Debug.Types(ClosurePtr(..))
 
 import Control.Monad.State
 import Data.List (sortBy)

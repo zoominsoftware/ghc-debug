@@ -9,6 +9,7 @@
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE BangPatterns #-}
 {- | Functions for performing whole heap census in the style of the normal
 - heap profiling -}
 module GHC.Debug.Profile( censusClosureType
@@ -28,7 +29,7 @@ import GHC.Debug.ParTrace
 import GHC.Debug.Profile.Types
 
 import qualified Data.Map.Strict as Map
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Data.List (sortBy)
 import Data.Ord
 import Data.Text (pack, Text, unpack)
@@ -124,7 +125,7 @@ census2LevelClosureType cps = snd <$> runStateT (traceFromM funcs cps) Map.empty
       let k = closureToKey (noSize d)
           kargs = map (closureToKey . noSize) args
           final_k :: Text
-          final_k = k <> "[" <> T.intercalate "," kargs <> "]"
+          !final_k = k <> "[" <> T.intercalate "," kargs <> "]"
       in Map.insertWith (<>) final_k (mkCS (dcSize d))
 
 {-

@@ -11,6 +11,8 @@
 -- bytes
 module GHC.Debug.Decode ( decodeClosure
                         , decodeInfoTable
+                        , decodeCCS
+                        , decodeIndexTable
                         ) where
 
  -- (Addr#, unsafeCoerce#, Any, Word#, ByteArray#)
@@ -25,6 +27,8 @@ import Data.Binary.Get as B
 import Data.Binary
 import Control.Monad
 import Data.Bits
+import Data.Functor
+import GHC.Debug.Types (getCCS, getIndexTable)
 
 decodeClosureHeader :: Version -> Get (Maybe ProfHeaderWithPtr)
 decodeClosureHeader ver = do
@@ -173,6 +177,12 @@ decodeFromBS (RawClosure rc) parser =
     Right (_rem, o, v) ->
       let !s = fromIntegral o
       in DCS (Size s) v
+
+decodeFromBS' :: RawClosure -> Get a -> a
+decodeFromBS' (RawClosure rc) parser =
+  case runGetOrFail parser (BSL.fromStrict rc) of
+    Left err -> error ("DEC:" ++ show err ++ printBS rc)
+    Right (_rem, _offset, v) -> v
 
 decodeAPStack :: Version -> (StgInfoTableWithPtr, RawInfoTable) -> (ClosurePtr, RawClosure) ->  SizedClosure
 decodeAPStack ver (infot, _) (ClosurePtr cp, rc) = decodeFromBS rc $ do
@@ -349,6 +359,12 @@ decodeClosure ver i@(itb, _) c
         | SMALL_MUT_ARR_PTRS_CLEAN <= ty && ty <= SMALL_MUT_ARR_PTRS_FROZEN_CLEAN ->
             decodeSmallMutArr ver i c
         | otherwise -> error $ "unhandled closure type" ++ show ty
+
+decodeCCS :: Version -> RawClosure -> CCSPayload
+decodeCCS _ rc = decodeFromBS' rc getCCS
+
+decodeIndexTable :: Version -> RawClosure -> IndexTable
+decodeIndexTable _ rc = decodeFromBS' rc getIndexTable
 
 decodeWeakClosure :: Version -> (StgInfoTableWithPtr, RawInfoTable) -> (ClosurePtr, RawClosure) -> SizedClosure
 decodeWeakClosure ver (infot, _) (_, rc) = decodeFromBS rc $ do

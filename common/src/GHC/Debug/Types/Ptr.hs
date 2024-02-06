@@ -62,6 +62,10 @@ module GHC.Debug.Types.Ptr( -- * InfoTables
                           , blockMaxSize
                           , CCSPtr(..)
                           , CCPtr(..)
+                          , readCCPtr
+                          , mkCCPtr
+                          , IndexTablePtr(..)
+                          , mkIndexTablePtr
                           , RetainerSetPtr(..)
 
                           -- * Other utility
@@ -119,6 +123,23 @@ newtype CCPtr = CCPtr Word64
                    deriving (Eq, Ord)
                    deriving newtype (Hashable)
                    deriving (Show, Binary) via ClosurePtr
+
+readCCPtr :: String -> Maybe CCPtr
+readCCPtr ('0':'x':s) = case readHex s of
+                               [(res, "")] -> Just (mkCCPtr res)
+                               _ -> Nothing
+readCCPtr _ = Nothing
+
+mkCCPtr :: Word64 -> CCPtr
+mkCCPtr = CCPtr
+
+newtype IndexTablePtr = IndexTablePtr Word64
+                   deriving (Eq, Ord)
+                   deriving newtype (Hashable)
+                   deriving (Show, Binary) via ClosurePtr
+
+mkIndexTablePtr :: Word64 -> IndexTablePtr
+mkIndexTablePtr = IndexTablePtr
 
 -- Invariant, ClosurePtrs are *always* untagged, we take some care to
 -- untag them when making a ClosurePtr so we don't have to do it on every

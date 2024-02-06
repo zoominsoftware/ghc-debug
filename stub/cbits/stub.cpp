@@ -94,7 +94,9 @@ enum commands {
     CMD_FUN_BITMAP = 16,
     CMD_GET_SRT = 17,
     CMD_GET_CCS = 18,
-    CMD_GET_CC = 19
+    CMD_GET_CC = 19,
+    CMD_GET_INDEX_TABLE = 20,
+    CMD_GET_CSS_MAIN = 21
 };
 
 enum response_code {
@@ -663,24 +665,18 @@ static int handle_command(Socket& sock, const char *buf, uint32_t cmd_len) {
         {
         trace("GET_CCS\n");
         CostCentreStack *ptr = (CostCentreStack *) p.get<uint64_t>();
-        uint16_t len = sizeof(CostCentreStack);
-        resp.write(htons(len));
-        resp.write((char *) ptr, len);
-
-        // trace("GET_CCS id %d\n", ptr -> ccsID);
-        // resp.write((uint64_t)ptr -> ccsID);
-        // trace("GET_CCS cc %p\n", ptr -> cc);
-        // resp.write((uint64_t)ptr -> cc);
-        // resp.write((uint64_t)ptr -> prevStack);
-        // resp.write((uint64_t)ptr -> indexTable);
-        // resp.write((uint64_t)ptr -> root);
-        // resp.write((uint64_t)ptr -> depth);
-        // resp.write((uint64_t)ptr -> scc_count);
-        // resp.write((uint64_t)ptr -> selected);
-        // resp.write((uint64_t)ptr -> time_ticks);
-        // resp.write((uint64_t)ptr -> mem_alloc);
-        // resp.write((uint64_t)ptr -> inherited_alloc);
-        // resp.write((uint64_t)ptr -> inherited_ticks);
+        resp.write((uint64_t)ptr -> ccsID);
+        resp.write((uint64_t)ptr -> cc);
+        resp.write((uint64_t)ptr -> prevStack);
+        resp.write((uint64_t)ptr -> indexTable);
+        resp.write((uint64_t)ptr -> root);
+        resp.write((uint64_t)ptr -> depth);
+        resp.write((uint64_t)ptr -> scc_count);
+        resp.write((uint64_t)ptr -> selected);
+        resp.write((uint64_t)ptr -> time_ticks);
+        resp.write((uint64_t)ptr -> mem_alloc);
+        resp.write((uint64_t)ptr -> inherited_alloc);
+        resp.write((uint64_t)ptr -> inherited_ticks);
         resp.finish(RESP_OKAY);
         break;
         }
@@ -697,6 +693,32 @@ static int handle_command(Socket& sock, const char *buf, uint32_t cmd_len) {
         resp.write((uint64_t)ptr -> is_caf);
         resp.write((uint64_t)ptr -> link);
         resp.finish(RESP_OKAY);
+        break;
+        }
+      case CMD_GET_INDEX_TABLE:
+        {
+        trace("CMD_GET_INDEX_TABLE\n");
+#if defined(PROFILING)
+        IndexTable_ *ptr = (IndexTable_ *) p.get<uint64_t>();
+        resp.write((uint64_t)ptr -> cc);
+        resp.write((uint64_t)ptr -> ccs);
+        resp.write((uint64_t)ptr -> next);
+        resp.write((uint8_t)ptr -> back_edge);
+        resp.finish(RESP_OKAY);
+#else /* !PROFILING */
+        resp.finish(RESP_BAD_COMMAND);
+#endif /* PROFILING */
+        break;
+        }
+      case CMD_GET_CSS_MAIN:
+        {
+        trace("GET_CSS_MAIN");
+#if defined(PROFILING)
+        resp.write((uint64_t) CCS_MAIN);
+        resp.finish(RESP_OKAY);
+#else /* !PROFILING */
+        resp.finish(RESP_BAD_COMMAND);
+#endif /* PROFILING */
         break;
         }
       case CMD_CON_DESCR:
