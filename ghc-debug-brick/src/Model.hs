@@ -167,6 +167,9 @@ data Command = Command { commandDescription :: Text
 mkCommand :: Text -> Vty.Event -> EventM Name OperationalState () -> Command
 mkCommand desc key dispatch = Command desc (Just key) (\_ -> dispatch)
 
+mkCommand' :: Text -> EventM Name OperationalState () -> Command
+mkCommand' desc dispatch = Command desc Nothing (\_ -> dispatch)
+
 data OverlayMode = KeybindingsShown
                  -- TODO: Abstract the "CommandPicker" into it's own module
                  | CommandPicker (Form Text () Name) (GenericList Name Seq Command) (Seq Command)

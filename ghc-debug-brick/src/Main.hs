@@ -13,6 +13,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Main where
 
@@ -143,7 +144,7 @@ myAppDraw (AppState majorState' _) =
     , ("Parent", Just (Vty.EvKey KLeft []))
     , ("Child", Just (Vty.EvKey KRight []))
     , ("Command Picker", Just (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]))
-    , ("Invert Filter", Just (Vty.EvKey (Vty.KChar 'n') [Vty.MCtrl]))]
+    , ("Invert Filter", Just invertFilterEvent)]
     ++ [(commandDescription cmd, commandKey cmd) | cmd <- F.toList commandList ]
     ++ [ ("Exit", Just (Vty.EvKey KEsc [])) ]
 
@@ -262,7 +263,7 @@ footer :: Int -> Maybe Int -> FooterMode -> Widget Name
 footer n m fmode = vLimit 1 $
  case fmode of
    FooterMessage t -> withAttr menuAttr $ hBox [txt t, fill ' ']
-   FooterInfo -> withAttr menuAttr $ hBox $ [padRight Max $ txt "(↑↓): select item | (→): expand | (←): collapse | (^p): command picker | (^n): invert filter | (?): full keybindings"]
+   FooterInfo -> withAttr menuAttr $ hBox $ [padRight Max $ txt "(↑↓): select item | (→): expand | (←): collapse | (^p): command picker | (^g): invert filter | (?): full keybindings"]
                                          ++ [padLeft (Pad 1) $ txt $
                                                (T.pack (show n) <> " items/" <> maybe "∞" (T.pack . show) m <> " max")]
    FooterInput _im form -> renderForm form
@@ -704,53 +705,65 @@ commandPickerMode =
 savedAndGCRoots :: TreeMode
 savedAndGCRoots = SavedAndGCRoots renderClosureDetails
 
+-- ----------------------------------------------------------------------------
+-- Commands and Shortcut constants
+-- ----------------------------------------------------------------------------
+
+invertFilterEvent :: Vty.Event
+invertFilterEvent = Vty.EvKey (KChar 'g') [Vty.MCtrl]
+
+isInvertFilterEvent :: Vty.Event -> Bool
+isInvertFilterEvent = (invertFilterEvent ==)
+
 -- All the commands which we support, these show up in keybindings and also the command picker
 commandList :: Seq.Seq Command
 commandList =
-  [ mkCommand "Show key bindings" (Vty.EvKey (KChar '?') [])
-            (modify $ keybindingsMode .~ KeybindingsShown)
-  , Command "Clear filters" Nothing
-            (const $ modify $ clearFilters)
-  , mkCommand "Saved/GC Roots" (Vty.EvKey (KChar 's') [Vty.MCtrl])
-            (modify $ treeMode .~ savedAndGCRoots)
-  , Command "Search with current filters" (Just $ Vty.EvKey (KChar 'c') [Vty.MCtrl])
-             searchWithCurrentFilters
-  , mkCommand "Find Address" (Vty.EvKey (KChar 'a') [Vty.MCtrl])
-            (modify $ footerMode .~ footerInput (FClosureAddress True False))
-  , mkCommand "Find Info Table" (Vty.EvKey (KChar 'i') [Vty.MCtrl])
-            (modify $ footerMode .~ footerInput (FInfoTableAddress True False))
-  , mkCommand "Write Profile" (Vty.EvKey (KChar 'w') [Vty.MCtrl])
-            (modify $ footerMode .~ footerInput FProfile)
-  , mkCommand "Find Retainers" (Vty.EvKey (KChar 'f') [Vty.MCtrl])
-            (modify $ footerMode .~ footerInput (FConstructorName True False))
-  , mkCommand "Find Retainers (Exact)" (Vty.EvKey (KChar 'e') [Vty.MCtrl])
-            (modify $ footerMode .~ footerInput (FClosureName True False))
-  , mkCommand "Find Retainers of large ARR_WORDS" (Vty.EvKey (KChar 'g') [Vty.MCtrl])
-            (modify $ footerMode .~ footerInput FArrWordsSize)
-  , mkCommand "Dump ARR_WORDS payload" (Vty.EvKey (KChar 'd') [Vty.MCtrl])
-            (modify $ footerMode .~ footerInput FDumpArrWords)
-  , mkCommand "Set search limit (default 100)" (Vty.EvKey (KChar 'l') [Vty.MCtrl])
-            (modify $ footerMode .~ footerInput FSetResultSize)
-  , mkCommand "Take Snapshot" (Vty.EvKey (KChar 'x') [Vty.MCtrl])
-            (modify $ footerMode .~ footerInput FSnapshot)
+  [ mkCommand  "Show key bindings"                 (Vty.EvKey (KChar '?') [])          (modify $ keybindingsMode .~ KeybindingsShown)
+  , mkCommand  "Clear filters"                     (Vty.EvKey (KChar 'w') [Vty.MCtrl]) (modify $ clearFilters)
+  , Command   "Search with current filters" (Just $ Vty.EvKey (KChar 'f') [Vty.MCtrl]) searchWithCurrentFilters
+  , mkCommand  "Set search limit (default 100)"    (Vty.EvKey (KChar 'l') [Vty.MCtrl]) (setFooterInputMode FSetResultSize)
+  , mkCommand  "Saved/GC Roots"                    (Vty.EvKey (KChar 's') [Vty.MCtrl]) (modify $ treeMode .~ savedAndGCRoots)
+  , mkCommand  "Find Address"                      (Vty.EvKey (KChar 'a') [Vty.MCtrl]) (setFooterInputMode (FClosureAddress True False))
+  , mkCommand  "Find Info Table"                   (Vty.EvKey (KChar 't') [Vty.MCtrl]) (setFooterInputMode (FInfoTableAddress True False))
+  , mkCommand  "Find Retainers"                    (Vty.EvKey (KChar 'e') [Vty.MCtrl]) (setFooterInputMode (FConstructorName True False))
+  , mkCommand' "Find Retainers (Exact)"                                                (setFooterInputMode (FClosureName True False))
+  , mkCommand  "Find closures by era"              (Vty.EvKey (KChar 'v') [Vty.MCtrl]) (setFooterInputMode (FFilterEras True False))
+  , mkCommand  "Find Retainers of large ARR_WORDS" (Vty.EvKey (KChar 'u') [Vty.MCtrl]) (setFooterInputMode FArrWordsSize)
+  , mkCommand  "Dump ARR_WORDS payload"            (Vty.EvKey (KChar 'j') [Vty.MCtrl]) (setFooterInputMode FDumpArrWords)
+  , mkCommand  "Write Profile"                     (Vty.EvKey (KChar 'b') [Vty.MCtrl]) (setFooterInputMode FProfile)
+  , mkCommand  "Take Snapshot"                     (Vty.EvKey (KChar 'x') [Vty.MCtrl]) (setFooterInputMode FSnapshot)
   , Command "ARR_WORDS Count" Nothing arrWordsAction
-  , Command "Find closures by era" Nothing
-            (\_ -> modify $ footerMode .~ footerInput (FFilterEras True False))
-  , Command "Add filter for address"          Nothing (const $ modify $ footerMode .~ footerInput (FClosureAddress False False))
-  , Command "Add filter for info table ptr"   Nothing (const $ modify $ footerMode .~ footerInput (FInfoTableAddress False False))
-  , Command "Add filter for constructor name" Nothing (const $ modify $ footerMode .~ footerInput (FConstructorName False False))
-  , Command "Add filter for closure name"     Nothing (const $ modify $ footerMode .~ footerInput (FClosureName False False))
-  , Command "Add filter for era"              Nothing (const $ modify $ footerMode .~ footerInput (FFilterEras False False))
-  , Command "Add filter for cost centre id"   Nothing (const $ modify $ footerMode .~ footerInput (FFilterCcId False False))
-  , Command "Add filter for closure size"     Nothing (const $ modify $ footerMode .~ footerInput (FFilterClosureSize False))
-  , Command "Add filter for closure type"     Nothing (const $ modify $ footerMode .~ footerInput (FFilterClosureType False))
-  ]
+  ] <> addFilterCommands
+  where
+    setFooterInputMode m = modify $ footerMode .~ footerInput m
 
+    addFilterCommands =
+      [ mkCommand' "Add filter for address"             (setFooterInputMode (FClosureAddress False False))
+      , mkCommand' "Add filter for info table ptr"      (setFooterInputMode (FInfoTableAddress False False))
+      , mkCommand' "Add filter for constructor name"    (setFooterInputMode (FConstructorName False False))
+      , mkCommand' "Add filter for closure name"        (setFooterInputMode (FClosureName False False))
+      , mkCommand' "Add filter for era"                 (setFooterInputMode (FFilterEras False False))
+      , mkCommand' "Add filter for cost centre id"      (setFooterInputMode (FFilterCcId False False))
+      , mkCommand' "Add filter for closure size"        (setFooterInputMode (FFilterClosureSize False))
+      , mkCommand' "Add filter for closure type"        (setFooterInputMode (FFilterClosureType False))
+      , mkCommand' "Add exclusion for address"          (setFooterInputMode (FClosureAddress False True))
+      , mkCommand' "Add exclusion for info table ptr"   (setFooterInputMode (FInfoTableAddress False True))
+      , mkCommand' "Add exclusion for constructor name" (setFooterInputMode (FConstructorName False True))
+      , mkCommand' "Add exclusion for closure name"     (setFooterInputMode (FClosureName False True))
+      , mkCommand' "Add exclusion for era"              (setFooterInputMode (FFilterEras False True))
+      , mkCommand' "Add exclusion for cost centre id"   (setFooterInputMode (FFilterCcId False True))
+      , mkCommand' "Add exclusion for closure size"     (setFooterInputMode (FFilterClosureSize True))
+      , mkCommand' "Add exclusion for closure type"     (setFooterInputMode (FFilterClosureType True))
+      ]
 
 findCommand :: Vty.Event -> Maybe Command
 findCommand event = do
   i <- Seq.findIndexL (\cmd -> commandKey cmd == Just event) commandList
   Seq.lookup i commandList
+
+-- ----------------------------------------------------------------------------
+-- Window Management
+-- ----------------------------------------------------------------------------
 
 handleMainWindowEvent :: Debuggee
                       -> Handler () OperationalState
@@ -786,11 +799,12 @@ inputFooterHandler dbg m form _k re@(VtyEvent e) =
   case e of
     Vty.EvKey KEsc [] -> modify resetFooter
     Vty.EvKey KEnter [] -> dispatchFooterInput dbg m form
-    Vty.EvKey (KChar 'n') [Vty.MCtrl] ->
-      let m' = invertInput m in
-      modify (footerMode .~ (FooterInput m' (updateFormState (formState form) $ footerInputForm m')))
-    _ -> do
-      zoom (lens (const form) (\ os form' -> set footerMode (FooterInput m form') os)) (handleFormEvent re)
+    _
+      | isInvertFilterEvent e ->
+          let m' = invertInput m in
+          modify (footerMode .~ (FooterInput m' (updateFormState (formState form) $ footerInputForm m')))
+      | otherwise -> do
+          zoom (lens (const form) (\ os form' -> set footerMode (FooterInput m form') os)) (handleFormEvent re)
 inputFooterHandler _ _ _ k re = k re
 
 
