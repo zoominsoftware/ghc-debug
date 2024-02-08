@@ -215,7 +215,7 @@ renderSourceInformation (SourceInformation name cty ty label' modu loc) =
 
 labelled :: Text -> Widget Name -> Widget Name
 labelled lbl w =
-  hLimit 17 (txtLabel lbl <+> vLimit 1 (fill ' ')) <+> w <+> vLimit 1 (fill ' ')
+  hLimit 20 (txtLabel lbl <+> vLimit 1 (fill ' ')) <+> w <+> vLimit 1 (fill ' ')
 
 renderUIFilter :: UIFilter -> Widget Name
 renderUIFilter (UIAddressFilter invert x)     = labelled (bool "" "!" invert <> "Closure address") (str (show x))
