@@ -219,6 +219,9 @@ ceilIntDiv a b = (a + b - 1) `div` b
 tsoVersionChanged :: Version -> Bool
 tsoVersionChanged (Version majv minv _ _) = (majv > 905) || (majv == 905 && minv >= 20220925)
 
+whyBlockedWord32 :: Version -> Bool
+whyBlockedWord32 (Version majv minv _ _) = majv > 909 || (majv == 909 && minv >= 20240201)
+
 decodeTSO :: Version
           -> (StgInfoTableWithPtr, RawInfoTable)
           -> (a, RawClosure)
@@ -229,8 +232,20 @@ decodeTSO ver (infot, _) (_, rc) = decodeFromBS rc $ do
   global_link <- getClosurePtr
   tsoStack <- getClosurePtr
   what_next <- parseWhatNext <$> getWord16le
-  why_blocked <- parseWhyBlocked <$> getWord16le
-  flags <- parseTsoFlags <$> getWord32le
+  (why_blocked, flags) <-
+    if whyBlockedWord32 ver
+      then do
+        flags <- parseTsoFlags <$> getWord32le
+        -- Padding
+        skip 2
+        why_blocked <- parseWhyBlocked <$> getWord32le
+        -- Padding
+        skip 4
+        return (why_blocked, flags)
+      else do
+        why_blocked <- parseWhyBlocked . fromIntegral @Word16 @Word32 <$> getWord16le
+        flags <- parseTsoFlags <$> getWord32le
+        return (why_blocked, flags)
   _block_info <- getClosurePtr
   threadId <- getWord64le
   saved_errno <- getWord32le
@@ -265,7 +280,7 @@ parseWhatNext i = case i of
   4 -> ThreadComplete
   _ -> WhatNextUnknownValue i
 
-parseWhyBlocked :: Word16 -> WhyBlocked
+parseWhyBlocked :: Word32 -> WhyBlocked
 parseWhyBlocked i = case i of
   0  -> NotBlocked
   1  -> BlockedOnMVar
