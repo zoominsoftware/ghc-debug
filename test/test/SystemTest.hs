@@ -59,18 +59,17 @@ spec = do
     describe "RequestSavedObjects" $
       it "should return saved object" $
         withStartedDebuggee "save-one-pause" $ \ h d -> do
-          waitForSync $ Server.stdout h
-          withAsync (pipeStreamThread (Server.stdout h)) $ \_ -> do
-            pausePoll d
-            os@(o:_) <- run d savedObjects
-            length os `shouldBe` 1
-            hg <- run d $ buildHeapGraph (Just 20) o
-            ppHeapGraph (const "") hg `shouldBe` "let x1() = I# 1\nin () r0:() x1\n\n"
+          waitForSync h
+          pausePoll d
+          os@(o:_) <- run d savedObjects
+          length os `shouldBe` 1
+          hg <- run d $ buildHeapGraph (Just 20) o
+          ppHeapGraph (const "") hg `shouldBe` "let x1() = I# 1\nin () r0:() x1\n\n"
 
     describe "RequestInfoTables" $
       it "should return decodable RawInfoTables" $
         withStartedDebuggee "save-one-pause" $ \ h d -> do
-          waitForSync $ Server.stdout h
+          waitForSync h
           pausePoll d
           sos <- run d savedObjects
           closures <- run d (dereferenceClosures sos)
@@ -81,7 +80,7 @@ spec = do
     describe "RequestSRT" $
       it "should return decodable SRT" $
         withStartedDebuggee "srts-test-prog" $ \ h d -> do
-          waitForSync $ Server.stdout h
+          waitForSync h
           pausePoll d
           sos <- run d savedObjects
           closures <- run d (dereferenceClosures sos)
@@ -93,7 +92,7 @@ spec = do
     describe "RequestConstrDesc" $
       it "should return ConstrDesc of saved value (I# 1)" $
         withStartedDebuggee "save-one-pause" $ \ h d -> do
-          waitForSync $ Server.stdout h
+          waitForSync h
           pausePoll d
           (c:_) <- run d (savedObjects >>= dereferenceClosures)
           let itptr = tableId . info . noSize $ c
@@ -103,7 +102,7 @@ spec = do
     describe "RequestSourceInfo" $
       it "should return IPE information for saved object" $
         withStartedDebuggee "save-ipe-pause" $ \ h d -> do
-          waitForSync $ Server.stdout h
+          waitForSync h
           pause d
           (c:_) <- run d (savedObjects >>= dereferenceClosures)
           let itptr = tableId . info . noSize $ c
@@ -113,7 +112,7 @@ spec = do
     describe "RequestBlocks" $
       it "should return all blocks" $
         withStartedDebuggee "clock" $ \ h d -> do
-          waitForSync $ Server.stdout h
+          waitForSync h
           pause d
           bs <- run d precacheBlocks
           length bs `shouldSatisfy` (> 10)
@@ -123,7 +122,7 @@ spec = do
         withSystemTempDirectory "ghc-debug" $ \td -> do
           let ss_fp = (td </> "ghc-debug-cache")
           non_par <- withStartedDebuggee "clock" $ \ h d -> do
-            waitForSync $ Server.stdout h
+            waitForSync h
             pause d
             run d (snapshot ss_fp)
             run d (gcRoots >>= count)
@@ -142,9 +141,9 @@ spec = do
     describe "RequestResume" $
       it "should resume a paused debugee" $
         withStartedDebuggee "clock" $ \ h d -> do
-          waitForSync $ Server.stdout h
+          waitForSync h
           ref <- newIORef []
-          withAsync (pipeStreamToListThread ref (Server.stdout h)) $ \_ -> do
+          withAsync (pipeStreamToListThread ref h) $ \_ -> do
             pause d
             (t:_) <- readIORef ref
             assertNoNewClockTimes ref t
@@ -177,30 +176,18 @@ spec = do
 fiveSecondsInMicros :: Int
 fiveSecondsInMicros = 5000000
 
-waitForSync :: Handle -> IO ()
+waitForSync :: Handles -> IO ()
 waitForSync h = do
-  result <- timeout fiveSecondsInMicros $ do
-    hSetBuffering h LineBuffering
-    l <- hGetLine h
-    if l == "\"sync\"" then
-      return ()
-    else
-      waitForSync h
-
+  result <- timeout fiveSecondsInMicros $ ready h
   case result of
     Nothing -> error "Can not sync!"
     _ -> return ()
 
-pipeStreamThread :: Handle -> IO ()
-pipeStreamThread h = forever $ do
-        l <- hGetLine h
-        print l
-
 type ClockTime = Word64
 
-pipeStreamToListThread :: IORef [ClockTime] -> Handle -> IO ()
+pipeStreamToListThread :: IORef [ClockTime] -> Handles -> IO ()
 pipeStreamToListThread ref h = forever $ do
-  l <- hGetLine h
+  l <- readChan (output h)
   timesList <- readIORef ref
   writeIORef ref $ toClockTime l : timesList
   where
