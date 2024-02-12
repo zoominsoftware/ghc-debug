@@ -96,8 +96,8 @@ myAppDraw (AppState majorState' _) =
         , withAttr menuAttr $ vLimit 1 $ hBox [txt "(p): Pause | (ESC): Exit", fill ' ']
         ]]
 
-      (PausedMode os@(OperationalState _ treeMode' kbmode fmode _ _ _ _ rfilters)) -> let
-        in kbOverlay kbmode
+      (PausedMode os@(OperationalState _ treeMode' kbmode fmode _ _ _ _ rfilters debuggeeVersion)) -> let
+        in kbOverlay kbmode debuggeeVersion
           $ [mainBorder ("ghc-debug - Paused - " <> socketName socket) $ vBox
           [ -- Current closure details
               joinBorders $ (borderWithLabel (txt "Closure Details") $
@@ -118,20 +118,20 @@ myAppDraw (AppState majorState' _) =
 
   where
 
-  kbOverlay :: OverlayMode -> [Widget Name] -> [Widget Name]
-  kbOverlay KeybindingsShown ws = centerLayer kbWindow : ws
-  kbOverlay (CommandPicker inp cmd_list _) ws  = centerLayer (cpWindow inp cmd_list) : ws
-  kbOverlay NoOverlay ws = ws
+  kbOverlay :: OverlayMode -> GD.Version -> [Widget Name] -> [Widget Name]
+  kbOverlay KeybindingsShown _ ws = centerLayer kbWindow : ws
+  kbOverlay (CommandPicker inp cmd_list _) debuggeeVersion ws  = centerLayer (cpWindow debuggeeVersion inp cmd_list) : ws
+  kbOverlay NoOverlay _ ws = ws
 
   filterWindow [] = emptyWidget
   filterWindow xs = borderWithLabel (txt "Filters") $ hLimit 50 $ vBox $ map renderUIFilter xs
 
-  cpWindow :: Form Text () Name -> GenericList Name Seq.Seq Command -> Widget Name
-  cpWindow input cmd_list = hLimit (actual_width + 2) $ vLimit (length commandList + 4) $
+  cpWindow :: GD.Version -> Form Text () Name -> GenericList Name Seq.Seq Command -> Widget Name
+  cpWindow debuggeeVersion input cmd_list = hLimit (actual_width + 2) $ vLimit (length commandList + 4) $
     withAttr menuAttr $
     borderWithLabel (txt "Command Picker") $ vBox $
       [ renderForm input
-      , renderList (\elIsSelected -> if elIsSelected then highlighted . renderCommand else renderCommand) False cmd_list]
+      , renderList (\elIsSelected -> if elIsSelected then highlighted . renderCommand debuggeeVersion else renderCommand debuggeeVersion) False cmd_list]
 
   kbWindow :: Widget Name
   kbWindow =
@@ -165,8 +165,13 @@ myAppDraw (AppState majorState' _) =
   renderNormalKey KRight = "→"
   renderNormalKey _k = "�"
 
-  renderCommand cmd = renderCommandDesc (commandDescription cmd, commandKey cmd)
+  mayDisableMenuItem debuggeeVersion cmd
+    | isCmdDisabled debuggeeVersion cmd = disabledMenuItem
+    | otherwise = id
 
+  renderCommand debuggeeVersion cmd =
+    mayDisableMenuItem debuggeeVersion cmd $
+    renderCommandDesc (commandDescription cmd, commandKey cmd)
 
   renderCommandDesc :: (Text, Maybe Vty.Event) -> Widget Name
   renderCommandDesc (desc, k) = txt (desc <> T.replicate padding " " <> key)
@@ -367,6 +372,7 @@ myAppHandleEvent brickEvent = do
           -- Pause the debuggee
           VtyEvent (Vty.EvKey (KChar 'p') []) -> do
             liftIO $ pause debuggee'
+            ver <- liftIO $ GD.version debuggee'
             (rootsTree, initRoots) <- liftIO $ mkSavedAndGCRootsIOTree
             put (appState & majorState . mode .~
                         PausedMode
@@ -378,7 +384,8 @@ myAppHandleEvent brickEvent = do
                                             rootsTree
                                             eventChan
                                             (Just 100)
-                                            []))
+                                            []
+                                            ver))
 
 
 
@@ -417,7 +424,6 @@ myAppHandleEvent brickEvent = do
           savedClosures' <- liftIO $ mapM (completeClosureDetails debuggee') raw_saved
           return $ (mkIOTree debuggee' (savedClosures' ++ rootClosures') getChildren renderInlineClosureDesc id
                    , fmap toPtr <$> (raw_roots ++ raw_saved))
-          where
 
 
 getChildren :: Debuggee -> ClosureDetails
@@ -662,11 +668,12 @@ handleMain dbg e = do
                 if (formState form /= formState form') then do
                     let filter_string = formState form'
                         new_elems = Seq.filter (\cmd -> T.toLower filter_string `T.isInfixOf` T.toLower (commandDescription cmd )) orig_cmds
-                        cmd_list'' = cmd_list' & listElementsL .~ new_elems
-                                           & listSelectedL .~ if Seq.null new_elems then Nothing else Just 0
-                    modify $ keybindingsMode .~ (CommandPicker form' cmd_list'' orig_cmds)
+                        cmd_list'' = cmd_list'
+                                          & listElementsL .~ new_elems
+                                          & listSelectedL .~ if Seq.null new_elems then Nothing else Just 0
+                    modify $ keybindingsMode .~ CommandPicker form' cmd_list'' orig_cmds
                   else
-                    modify $ keybindingsMode .~ (CommandPicker form' cmd_list' orig_cmds)
+                    modify $ keybindingsMode .~ CommandPicker form' cmd_list' orig_cmds
 
 
           case e of
@@ -680,9 +687,12 @@ handleMain dbg e = do
                 put $ os & keybindingsMode .~ NoOverlay
               VtyEvent (Vty.EvKey Vty.KEnter _) -> do
                 case listSelectedElement cmd_list of
-                  Just (_, cmd) -> do
-                    modify $ keybindingsMode .~ NoOverlay
-                    dispatchCommand cmd dbg
+                  Just (_, cmd)
+                    | isCmdDisabled (_version os) cmd ->
+                      return () -- If the command is disabled, just ignore the key press
+                    | otherwise -> do
+                      modify $ keybindingsMode .~ NoOverlay
+                      dispatchCommand cmd dbg
                   Nothing  -> return ()
               _ -> do
                 form' <- handle_form
@@ -718,48 +728,52 @@ isInvertFilterEvent = (invertFilterEvent ==)
 -- All the commands which we support, these show up in keybindings and also the command picker
 commandList :: Seq.Seq Command
 commandList =
-  [ mkCommand  "Show key bindings"                 (Vty.EvKey (KChar '?') [])          (modify $ keybindingsMode .~ KeybindingsShown)
-  , mkCommand  "Clear filters"                     (Vty.EvKey (KChar 'w') [Vty.MCtrl]) (modify $ clearFilters)
-  , Command   "Search with current filters" (Just $ Vty.EvKey (KChar 'f') [Vty.MCtrl]) searchWithCurrentFilters
-  , mkCommand  "Set search limit (default 100)"    (Vty.EvKey (KChar 'l') [Vty.MCtrl]) (setFooterInputMode FSetResultSize)
-  , mkCommand  "Saved/GC Roots"                    (Vty.EvKey (KChar 's') [Vty.MCtrl]) (modify $ treeMode .~ savedAndGCRoots)
-  , mkCommand  "Find Address"                      (Vty.EvKey (KChar 'a') [Vty.MCtrl]) (setFooterInputMode (FClosureAddress True False))
-  , mkCommand  "Find Info Table"                   (Vty.EvKey (KChar 't') [Vty.MCtrl]) (setFooterInputMode (FInfoTableAddress True False))
-  , mkCommand  "Find Retainers"                    (Vty.EvKey (KChar 'e') [Vty.MCtrl]) (setFooterInputMode (FConstructorName True False))
-  , mkCommand' "Find Retainers (Exact)"                                                (setFooterInputMode (FClosureName True False))
-  , mkCommand  "Find closures by era"              (Vty.EvKey (KChar 'v') [Vty.MCtrl]) (setFooterInputMode (FFilterEras True False))
-  , mkCommand  "Find Retainers of large ARR_WORDS" (Vty.EvKey (KChar 'u') [Vty.MCtrl]) (setFooterInputMode FArrWordsSize)
-  , mkCommand  "Dump ARR_WORDS payload"            (Vty.EvKey (KChar 'j') [Vty.MCtrl]) (setFooterInputMode FDumpArrWords)
-  , mkCommand  "Write Profile"                     (Vty.EvKey (KChar 'b') [Vty.MCtrl]) (setFooterInputMode FProfile)
-  , mkCommand  "Take Snapshot"                     (Vty.EvKey (KChar 'x') [Vty.MCtrl]) (setFooterInputMode FSnapshot)
-  , Command "ARR_WORDS Count" Nothing arrWordsAction
+  [ mkCommand  "Show key bindings"            (Vty.EvKey (KChar '?') []) (modify $ keybindingsMode .~ KeybindingsShown)
+  , mkCommand  "Clear filters"                     (withCtrlKey 'w') (modify $ clearFilters)
+  , Command   "Search with current filters" (Just $ withCtrlKey 'f') searchWithCurrentFilters NoReq
+  , mkCommand  "Set search limit (default 100)"    (withCtrlKey 'l') (setFooterInputMode FSetResultSize)
+  , mkCommand  "Saved/GC Roots"                    (withCtrlKey 's') (modify $ treeMode .~ savedAndGCRoots)
+  , mkCommand  "Find Address"                      (withCtrlKey 'a') (setFooterInputMode (FClosureAddress True False))
+  , mkCommand  "Find Info Table"                   (withCtrlKey 't') (setFooterInputMode (FInfoTableAddress True False))
+  , mkCommand  "Find Retainers"                    (withCtrlKey 'e') (setFooterInputMode (FConstructorName True False))
+  , mkCommand' "Find Retainers (Exact)"                              (setFooterInputMode (FClosureName True False))
+  , mkFilterCmd "Find closures by era"             (withCtrlKey 'v') (setFooterInputMode (FFilterEras True False)) ReqErasProfiling
+  , mkCommand  "Find Retainers of large ARR_WORDS" (withCtrlKey 'u') (setFooterInputMode FArrWordsSize)
+  , mkCommand  "Dump ARR_WORDS payload"            (withCtrlKey 'j') (setFooterInputMode FDumpArrWords)
+  , mkCommand  "Write Profile"                     (withCtrlKey 'b') (setFooterInputMode FProfile)
+  , mkCommand  "Take Snapshot"                     (withCtrlKey 'x') (setFooterInputMode FSnapshot)
+  , Command "ARR_WORDS Count" Nothing arrWordsAction NoReq
   ] <> addFilterCommands
   where
     setFooterInputMode m = modify $ footerMode .~ footerInput m
 
+    addFilterCommands ::  Seq.Seq Command
     addFilterCommands =
-      [ mkCommand' "Add filter for address"             (setFooterInputMode (FClosureAddress False False))
-      , mkCommand' "Add filter for info table ptr"      (setFooterInputMode (FInfoTableAddress False False))
-      , mkCommand' "Add filter for constructor name"    (setFooterInputMode (FConstructorName False False))
-      , mkCommand' "Add filter for closure name"        (setFooterInputMode (FClosureName False False))
-      , mkCommand' "Add filter for era"                 (setFooterInputMode (FFilterEras False False))
-      , mkCommand' "Add filter for cost centre id"      (setFooterInputMode (FFilterCcId False False))
-      , mkCommand' "Add filter for closure size"        (setFooterInputMode (FFilterClosureSize False))
-      , mkCommand' "Add filter for closure type"        (setFooterInputMode (FFilterClosureType False))
-      , mkCommand' "Add exclusion for address"          (setFooterInputMode (FClosureAddress False True))
-      , mkCommand' "Add exclusion for info table ptr"   (setFooterInputMode (FInfoTableAddress False True))
-      , mkCommand' "Add exclusion for constructor name" (setFooterInputMode (FConstructorName False True))
-      , mkCommand' "Add exclusion for closure name"     (setFooterInputMode (FClosureName False True))
-      , mkCommand' "Add exclusion for era"              (setFooterInputMode (FFilterEras False True))
-      , mkCommand' "Add exclusion for cost centre id"   (setFooterInputMode (FFilterCcId False True))
-      , mkCommand' "Add exclusion for closure size"     (setFooterInputMode (FFilterClosureSize True))
-      , mkCommand' "Add exclusion for closure type"     (setFooterInputMode (FFilterClosureType True))
+      [ mkCommand'   "Add filter for address"             (setFooterInputMode (FClosureAddress False False))
+      , mkCommand'   "Add filter for info table ptr"      (setFooterInputMode (FInfoTableAddress False False))
+      , mkCommand'   "Add filter for constructor name"    (setFooterInputMode (FConstructorName False False))
+      , mkCommand'   "Add filter for closure name"        (setFooterInputMode (FClosureName False False))
+      , mkFilterCmd' "Add filter for era"                 (setFooterInputMode (FFilterEras False False)) ReqErasProfiling
+      , mkFilterCmd' "Add filter for cost centre id"      (setFooterInputMode (FFilterCcId False False)) ReqSomeProfiling
+      , mkCommand'   "Add filter for closure size"        (setFooterInputMode (FFilterClosureSize False))
+      , mkCommand'   "Add filter for closure type"        (setFooterInputMode (FFilterClosureType False))
+      , mkCommand'   "Add exclusion for address"          (setFooterInputMode (FClosureAddress False True))
+      , mkCommand'   "Add exclusion for info table ptr"   (setFooterInputMode (FInfoTableAddress False True))
+      , mkCommand'   "Add exclusion for constructor name" (setFooterInputMode (FConstructorName False True))
+      , mkCommand'   "Add exclusion for closure name"     (setFooterInputMode (FClosureName False True))
+      , mkFilterCmd' "Add exclusion for era"              (setFooterInputMode (FFilterEras False True)) ReqErasProfiling
+      , mkFilterCmd' "Add exclusion for cost centre id"   (setFooterInputMode (FFilterCcId False True)) ReqSomeProfiling
+      , mkCommand'   "Add exclusion for closure size"     (setFooterInputMode (FFilterClosureSize True))
+      , mkCommand'   "Add exclusion for closure type"     (setFooterInputMode (FFilterClosureType True))
       ]
+
+    withCtrlKey char = Vty.EvKey (KChar char) [Vty.MCtrl]
 
 findCommand :: Vty.Event -> Maybe Command
 findCommand event = do
   i <- Seq.findIndexL (\cmd -> commandKey cmd == Just event) commandList
   Seq.lookup i commandList
+
 
 -- ----------------------------------------------------------------------------
 -- Window Management
@@ -768,13 +782,18 @@ findCommand event = do
 handleMainWindowEvent :: Debuggee
                       -> Handler () OperationalState
 handleMainWindowEvent dbg brickEvent = do
-      os@(OperationalState _ treeMode' _kbMode _footerMode _curRoots rootsTree _ _ _) <- get
+      os@(OperationalState _ treeMode' _kbMode _footerMode _curRoots rootsTree _ _ _ debuggeeVersion) <- get
       case brickEvent of
         VtyEvent (Vty.EvKey (KChar 'p') [Vty.MCtrl]) ->
           put $ os & keybindingsMode .~ commandPickerMode
 
         -- A generic event
-        VtyEvent event | Just cmd <- findCommand event -> dispatchCommand cmd dbg
+        VtyEvent event
+          | Just cmd <- findCommand event ->
+            if isCmdDisabled debuggeeVersion cmd
+              then return () -- Command is disabled, don't dispatch the command
+              else dispatchCommand cmd dbg
+
         -- Navigate the tree of closures
         VtyEvent event -> case treeMode' of
           SavedAndGCRoots {} -> do
@@ -964,6 +983,7 @@ myAppAttrMap _appState =
     , (labelAttr, Vty.withStyle (fg Vty.white) Vty.bold)
     , (highlightAttr, Vty.black `on` Vty.yellow)
     , (treeAttr, fg Vty.red)
+    , (disabledMenuAttr, Vty.withStyle (Vty.cyan `on` Vty.blue) Vty.bold)
     ]
 
 menuAttr :: AttrName
@@ -981,11 +1001,17 @@ treeAttr = attrName "tree"
 highlightAttr :: AttrName
 highlightAttr = attrName "highlighted"
 
+disabledMenuAttr :: AttrName
+disabledMenuAttr = attrName "disabledMenu"
+
 txtLabel :: Text -> Widget n
 txtLabel = withAttr labelAttr . txt
 
 highlighted :: Widget n -> Widget n
 highlighted = forceAttr highlightAttr
+
+disabledMenuItem :: Widget n -> Widget n
+disabledMenuItem = forceAttr disabledMenuAttr
 
 main :: IO ()
 main = do

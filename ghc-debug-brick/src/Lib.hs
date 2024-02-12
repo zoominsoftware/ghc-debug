@@ -34,6 +34,9 @@ module Lib
     -- * Querying the paused debuggee
   , rootClosures
   , savedClosures
+  , version
+  , profilingMode
+  , GD.Version
 
     -- * Closures
   , Closure
@@ -122,6 +125,7 @@ import qualified GHC.Debug.CostCentres as GD
 import           GHC.Debug.Retainers (EraRange(..), ClosureFilter(..))
 import qualified GHC.Debug.Snapshot as GD
 import qualified GHC.Debug.Strings as GD
+import qualified GHC.Debug.Types.Version as GD
 import qualified GHC.Debug.Types.Graph as HG
 import Control.Monad
 import System.FilePath
@@ -223,6 +227,12 @@ rootClosures e = run e $ do
             | closurePtr' <- closurePtrs
             | closure <- closures
             ]
+
+version :: Debuggee -> IO GD.Version
+version e = run e GD.version
+
+profilingMode :: GD.Version -> Maybe GD.ProfilingMode
+profilingMode = GD.v_profiling
 
 -- | A client can save objects by calling a special RTS method
 -- This function returns the closures it saved.

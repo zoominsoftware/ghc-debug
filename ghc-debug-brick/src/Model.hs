@@ -37,9 +37,11 @@ import IOTree
 import Control.Concurrent
 import qualified Graphics.Vty as Vty
 import Data.Int
+import GHC.Debug.Client (ccID)
 import GHC.Debug.Client.Monad (DebugM)
 import GHC.Debug.CostCentres (findAllChildrenOfCC)
-import GHC.Debug.Client (ccID)
+import qualified GHC.Debug.Types as GD
+import qualified GHC.Debug.Types.Version as GD
 
 
 data Event
@@ -159,16 +161,44 @@ data FooterInputMode = FClosureAddress {runNow :: Bool, invert :: Bool}
                      | FSetResultSize
                      deriving Show
 
+-- | Profiling requirement for a command
+data ProfilingReq
+  = ReqSomeProfiling
+  | ReqErasProfiling
+  | NoReq
+
 data Command = Command { commandDescription :: Text
                        , commandKey :: Maybe Vty.Event
                        , dispatchCommand :: Debuggee -> EventM Name OperationalState ()
+                       , commandRequiresProfMode :: ProfilingReq
+                       -- ^ The command requires that the debuggee is in a specific
+                       -- profiling mode.
+                       -- For example, we can only filter by eras if the program
+                       -- has era profiling enabled.
                        }
 
 mkCommand :: Text -> Vty.Event -> EventM Name OperationalState () -> Command
-mkCommand desc key dispatch = Command desc (Just key) (\_ -> dispatch)
+mkCommand desc ev dispatch = Command desc (Just ev) (\_ -> dispatch) NoReq
 
 mkCommand' :: Text -> EventM Name OperationalState () -> Command
-mkCommand' desc dispatch = Command desc Nothing (\_ -> dispatch)
+mkCommand' desc dispatch = Command desc Nothing (\_ -> dispatch) NoReq
+
+mkFilterCmd :: Text -> Vty.Event -> EventM Name OperationalState () -> ProfilingReq -> Command
+mkFilterCmd desc ev dispatch profMode = Command desc (Just ev) (\_ -> dispatch) profMode
+
+mkFilterCmd' :: Text -> EventM Name OperationalState () -> ProfilingReq -> Command
+mkFilterCmd' desc dispatch profMode = Command desc Nothing (\_ -> dispatch) profMode
+
+isCmdEnabled :: GD.Version -> Command -> Bool
+isCmdEnabled debuggeeVersion cmd = case commandRequiresProfMode cmd of
+  NoReq -> True
+  ReqErasProfiling ->
+    Just GD.EraProfiling == GD.v_profiling debuggeeVersion
+  ReqSomeProfiling ->
+    GD.isProfiledRTS debuggeeVersion
+
+isCmdDisabled :: GD.Version -> Command -> Bool
+isCmdDisabled v cmd = not $ isCmdEnabled v cmd
 
 data OverlayMode = KeybindingsShown
                  -- TODO: Abstract the "CommandPicker" into it's own module
@@ -227,6 +257,7 @@ data OperationalState = OperationalState
     , _event_chan :: BChan Event
     , _resultSize :: Maybe Int
     , _filters :: [UIFilter]
+    , _version :: GD.Version
     }
 
 clearFilters :: OperationalState -> OperationalState
@@ -296,7 +327,7 @@ osSize :: OperationalState -> Int
 osSize os = fromMaybe (Prelude.length (getIOTreeRoots $ _treeSavedAndGCRoots os)) $ treeLength (_treeMode os)
 
 pauseModeTree :: (forall a . (a -> Widget Name) -> IOTree a Name -> r) -> OperationalState -> r
-pauseModeTree k (OperationalState _ mode _kb _footer _from roots _ _ _) = case mode of
+pauseModeTree k (OperationalState _ mode _kb _footer _from roots _ _ _ _) = case mode of
   SavedAndGCRoots render -> k render roots
   Retainer render r -> k render r
   Searched render r -> k render r

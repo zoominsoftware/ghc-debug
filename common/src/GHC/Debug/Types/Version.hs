@@ -4,7 +4,7 @@ import Data.Word
 import Data.Maybe (isJust)
 
 data ProfilingMode
-  = NoProfiling -- we are running profiled code but not doing any profiling right now
+  = NoProfiling -- ^ We are running profiled code but not doing any profiling right now
   | RetainerProfiling
   | LDVProfiling
   | EraProfiling
