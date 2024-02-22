@@ -6,6 +6,7 @@
 {-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE NumericUnderscores #-}
 
 -- | Data types for representing different pointers and raw information
 -- All pointers are stored in little-endian to make arithmetic easier.
@@ -276,10 +277,10 @@ mblockMaxSize = mblockMask + 1
 blockMaxSize = blockMask + 1
 
 mblockMask :: Word64
-mblockMask = 0b11111111111111111111 -- 20 bits
+mblockMask = 0b1111_1111_1111_1111_1111 -- 20 bits
 
 blockMask :: Word64
-blockMask = 0b111111111111 -- 12 bits
+blockMask = 0b1111_1111_1111 -- 12 bits
 
 isPinnedBlock :: RawBlock -> Bool
 isPinnedBlock (RawBlock _ flags _) = (flags .&. 0b100) /= 0

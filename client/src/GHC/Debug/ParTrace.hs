@@ -5,7 +5,9 @@
 {-# LANGUAGE UnboxedTuples #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE NumericUnderscores #-}
+{-# LANGUAGE TypeApplications #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+
 -- | Functions to support the constant space traversal of a heap.
 -- This module is like the Trace module but performs the tracing in
 -- parellel. The speed-up is quite modest but hopefully can be improved in
@@ -31,6 +33,7 @@ import Data.IORef
 import Control.Exception.Base
 import Control.Concurrent.STM
 import Data.Bitraversable
+import Data.Coerce ( coerce )
 
 threads :: Int
 threads = 64
@@ -44,14 +47,17 @@ type OutChan = TChan
 -- * Outer map, segmented by MBlock
 --  * Inner map, blocks for that MBlock
 --    * Inner IOBitArray, visited information for that block
-data ThreadState s = ThreadState (IM.IntMap (IM.IntMap (IOBitArray Word16))) (IORef s)
+data ThreadState s = ThreadState
+  { visitedClosurePtrs :: IM.IntMap (IM.IntMap (IOBitArray Word16))
+  , visitedCcsPtrs :: IM.IntMap (IM.IntMap (IOBitArray Word16))
+  , globalState :: IORef s
+  }
 
 newtype ThreadInfo a = ThreadInfo (InChan (ClosurePtrWithInfo a))
 
 -- | A 'ClosurePtr' with some additional information which needs to be
 -- communicated across to another thread.
 data ClosurePtrWithInfo a = ClosurePtrWithInfo !a !ClosurePtr
-
 
 -- | Map from Thread -> Information about the thread
 type ThreadMap a = IM.IntMap (ThreadInfo a)
@@ -103,7 +109,7 @@ initThread n k = DebugM $ do
 workerThread :: forall s a . Monoid s => Int -> TraceFunctionsIO a s -> TVar Bool -> IORef s -> (ClosurePtrWithInfo a -> DebugM ()) -> OutChan (ClosurePtrWithInfo a) -> DebugM s
 workerThread n k worker_active ref go oc = DebugM $ do
   d <- ask
-  r <- liftIO $ newIORef (ThreadState IM.empty ref)
+  r <- liftIO $ newIORef (ThreadState IM.empty IM.empty ref)
   liftIO $ runSimple d (loop r)
   where
     loop r = do
@@ -126,17 +132,17 @@ workerThread n k worker_active ref go oc = DebugM $ do
     deref r (ClosurePtrWithInfo a cp) = do
         m <- unsafeLiftIO $ readIORef r
         do
-          (m', b) <- unsafeLiftIO $ checkVisit cp m
+          (m', b) <- unsafeLiftIO $ checkClosVisit cp m
           unsafeLiftIO $ writeIORef r m'
           if b
             then do
-              s <- visitedVal k cp a
+              s <- visitedClosVal k cp a
               unsafeLiftIO $ modifyIORef' ref (s <>)
             else do
               sc <- dereferenceClosure cp
               (a', s, cont) <- closTrace k cp sc a
               unsafeLiftIO $ modifyIORef' ref (s <>)
-              cont (() <$ hextraverse goCCS (gosrt r a') (gop r a') gocd (gos r a') (goc r . ClosurePtrWithInfo a') sc)
+              cont (() <$ hextraverse (goCCS r) (gosrt r a') (gop r a') gocd (gos r a') (goc r . ClosurePtrWithInfo a') sc)
 
     goc r c@(ClosurePtrWithInfo _i cp) =
       let mkey = getMBlockKey cp
@@ -155,10 +161,18 @@ workerThread n k worker_active ref go oc = DebugM $ do
       cd <- dereferenceConDesc d
       conDescTrace k cd
 
-    goCCS p = do
-      ccs' <- dereferenceCCS p
-      ccsTrace k ccs'
-      () <$ bitraverse goCCS goCC ccs'
+    goCCS r p = do
+        m <- unsafeLiftIO $ readIORef r
+        do
+          (m', b) <- unsafeLiftIO $ checkCcsVisit p m
+          unsafeLiftIO $ writeIORef r m'
+          if b
+            then do
+              visitedCcsVal k p
+            else do
+              ccs' <- dereferenceCCS p
+              ccsTrace k ccs'
+              () <$ bitraverse (goCCS r) goCC ccs'
 
     goCC p = do
       () <$ dereferenceCC p
@@ -190,46 +204,55 @@ handleBlockLevel bk offset m = do
       unless res (writeArray bm offset True)
       return (m, res)
 
-checkVisit :: ClosurePtr -> ThreadState s -> IO (ThreadState s, Bool)
-checkVisit cp st = do
+checkClosVisit :: ClosurePtr -> ThreadState s -> IO (ThreadState s, Bool)
+checkClosVisit cp st = do
   let (mbk, bk, offset) = getKeyTriple cp
-      ThreadState v ref = st
+      ThreadState v c ref = st
   case IM.lookup mbk v of
     Nothing -> do
       (st', res) <- handleBlockLevel bk offset IM.empty
-      return (ThreadState (IM.insert mbk st' v) ref, res)
+      return (ThreadState (IM.insert mbk st' v) c ref, res)
     Just bm -> do
       (st', res) <- handleBlockLevel bk offset bm
-      return (ThreadState (IM.insert mbk st' v) ref, res)
+      return (ThreadState (IM.insert mbk st' v) c ref, res)
 
-
-
-
+checkCcsVisit :: CCSPtr -> ThreadState s -> IO (ThreadState s, Bool)
+checkCcsVisit ccsPtr st = do
+  let (mbk, bk, offset) = getKeyTriple $ coerce @CCSPtr @ClosurePtr ccsPtr
+      ThreadState v c ref = st
+  case IM.lookup mbk c of
+    Nothing -> do
+      (st', res) <- handleBlockLevel bk offset IM.empty
+      return (ThreadState v (IM.insert mbk st' c) ref, res)
+    Just bm -> do
+      (st', res) <- handleBlockLevel bk offset bm
+      return (ThreadState v (IM.insert mbk st' c) ref, res)
 
 data TraceFunctionsIO a s =
       TraceFunctionsIO { papTrace :: !(GenPapPayload ClosurePtr -> DebugM ())
       , srtTrace :: !(GenSrtPayload ClosurePtr -> DebugM ())
       , stackTrace :: !(GenStackFrames SrtCont ClosurePtr -> DebugM ())
       , closTrace :: !(ClosurePtr -> SizedClosure -> a -> DebugM (a, s, DebugM () -> DebugM ()))
-      , visitedVal :: !(ClosurePtr -> a -> DebugM s)
+      , visitedClosVal :: !(ClosurePtr -> a -> DebugM s)
+      , visitedCcsVal :: !(CCSPtr -> DebugM ())
       , conDescTrace :: !(ConstrDesc -> DebugM ())
       , ccsTrace :: !(CCSPayload -> DebugM ())
       }
 
 
 -- | A generic heap traversal function which will use a small amount of
--- memory linear in the heap size. Using this function with appropiate
+-- memory linear in the heap size. Using this function with appropriate
 -- accumulation functions you should be able to traverse quite big heaps in
 -- not a huge amount of memory.
 --
--- The performance of this parralel version depends on how much contention
+-- The performance of this parallel version depends on how much contention
 -- the functions given in 'TraceFunctionsIO' content for the handle
 -- connecting for the debuggee (which is protected by an 'MVar'). With no
 -- contention, and precached blocks, the workload can be very evenly
 -- distributed leading to high core utilisation.
 --
 -- As performance depends highly on contention, snapshot mode is much more
--- amenable to parrelisation where the time taken for requests is much
+-- amenable to parallelisation where the time taken for requests is much
 -- lower.
 traceParFromM :: Monoid s => TraceFunctionsIO a s -> [ClosurePtrWithInfo a] -> DebugM s
 traceParFromM k cps = do
@@ -260,7 +283,16 @@ tracePar :: [ClosurePtr] -> DebugM ()
 tracePar = traceParFromM funcs . map (ClosurePtrWithInfo ())
   where
     nop = const (return ())
-    funcs = TraceFunctionsIO nop nop stack clos (const (const (return ()))) nop (const (return ()))
+    funcs = TraceFunctionsIO
+      { papTrace = nop
+      , srtTrace = nop
+      , stackTrace = stack
+      , closTrace = clos
+      , visitedClosVal = const (const (return ()))
+      , visitedCcsVal = nop
+      , conDescTrace = nop
+      , ccsTrace = const (return ())
+      }
 
     stack :: GenStackFrames SrtCont ClosurePtr -> DebugM ()
     stack fs =

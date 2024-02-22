@@ -85,7 +85,8 @@ closureCensusBy f cps = do
               , srtTrace = const (return ())
               , stackTrace = const (return ())
               , closTrace = closAccum
-              , visitedVal = const (const (return MMap.empty))
+              , visitedClosVal = const (const (return MMap.empty))
+              , visitedCcsVal = const (return ())
               , conDescTrace = const (return ())
               , ccsTrace = const (return ())
             }
