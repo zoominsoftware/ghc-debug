@@ -34,9 +34,10 @@ import Control.Exception.Base
 import Control.Concurrent.STM
 import Data.Bitraversable
 import Data.Coerce ( coerce )
+import GHC.Conc (numCapabilities)
 
 threads :: Int
-threads = 64
+threads = numCapabilities
 
 type InChan = TChan
 type OutChan = TChan
@@ -48,8 +49,7 @@ type OutChan = TChan
 --  * Inner map, blocks for that MBlock
 --    * Inner IOBitArray, visited information for that block
 data ThreadState s = ThreadState
-  { visitedClosurePtrs :: IM.IntMap (IM.IntMap (IOBitArray Word16))
-  , visitedCcsPtrs :: IM.IntMap (IM.IntMap (IOBitArray Word16))
+  { visitedPtrs :: IM.IntMap (IM.IntMap (IOBitArray Word16))
   , globalState :: IORef s
   }
 
@@ -58,6 +58,7 @@ newtype ThreadInfo a = ThreadInfo (InChan (ClosurePtrWithInfo a))
 -- | A 'ClosurePtr' with some additional information which needs to be
 -- communicated across to another thread.
 data ClosurePtrWithInfo a = ClosurePtrWithInfo !a !ClosurePtr
+                          | CCSPtrWithInfo CCSPtr
 
 -- | Map from Thread -> Information about the thread
 type ThreadMap a = IM.IntMap (ThreadInfo a)
@@ -87,6 +88,12 @@ sendToChan  ts cpi@(ClosurePtrWithInfo _ cp) = DebugM $ liftIO $ do
   case IM.lookup mkey st of
     Nothing -> error $ "Not enough chans:" ++ show mkey ++ show threads
     Just (ThreadInfo ic) -> atomically $ writeTChan ic cpi
+sendToChan ts cpi@(CCSPtrWithInfo ccsPtr) = DebugM $ liftIO $ do
+  let st = visited ts
+      mkey = getMBlockKey (coerce ccsPtr)
+  case IM.lookup mkey st of
+    Nothing -> error $ "Not enough chans:" ++ show mkey ++ show threads
+    Just (ThreadInfo ic) -> atomically $ writeTChan ic cpi
 
 initThread :: Monoid s =>
               Int
@@ -109,7 +116,7 @@ initThread n k = DebugM $ do
 workerThread :: forall s a . Monoid s => Int -> TraceFunctionsIO a s -> TVar Bool -> IORef s -> (ClosurePtrWithInfo a -> DebugM ()) -> OutChan (ClosurePtrWithInfo a) -> DebugM s
 workerThread n k worker_active ref go oc = DebugM $ do
   d <- ask
-  r <- liftIO $ newIORef (ThreadState IM.empty IM.empty ref)
+  r <- liftIO $ newIORef (ThreadState IM.empty ref)
   liftIO $ runSimple d (loop r)
   where
     loop r = do
@@ -132,7 +139,7 @@ workerThread n k worker_active ref go oc = DebugM $ do
     deref r (ClosurePtrWithInfo a cp) = do
         m <- unsafeLiftIO $ readIORef r
         do
-          (m', b) <- unsafeLiftIO $ checkClosVisit cp m
+          (m', b) <- unsafeLiftIO $ checkVisit cp m
           unsafeLiftIO $ writeIORef r m'
           if b
             then do
@@ -143,6 +150,20 @@ workerThread n k worker_active ref go oc = DebugM $ do
               (a', s, cont) <- closTrace k cp sc a
               unsafeLiftIO $ modifyIORef' ref (s <>)
               cont (() <$ hextraverse (goCCS r) (gosrt r a') (gop r a') gocd (gos r a') (goc r . ClosurePtrWithInfo a') sc)
+    deref r (CCSPtrWithInfo cp) = do
+        m <- unsafeLiftIO $ readIORef r
+        do
+          (m', b) <- unsafeLiftIO $ checkVisit (coerce cp) m
+          unsafeLiftIO $ writeIORef r m'
+          if b
+            then do
+              s <- visitedCcsVal k cp
+              unsafeLiftIO $ modifyIORef' ref (s <>)
+            else do
+              ccs' <- dereferenceCCS cp
+              s <- ccsTrace k cp ccs'
+              unsafeLiftIO $ modifyIORef' ref (s <>)
+              () <$ bitraverse (goCCS r) goCC ccs'
 
     goc r c@(ClosurePtrWithInfo _i cp) =
       let mkey = getMBlockKey cp
@@ -161,18 +182,11 @@ workerThread n k worker_active ref go oc = DebugM $ do
       cd <- dereferenceConDesc d
       conDescTrace k cd
 
-    goCCS r p = do
-        m <- unsafeLiftIO $ readIORef r
-        do
-          (m', b) <- unsafeLiftIO $ checkCcsVisit p m
-          unsafeLiftIO $ writeIORef r m'
-          if b
-            then do
-              visitedCcsVal k p
-            else do
-              ccs' <- dereferenceCCS p
-              ccsTrace k ccs'
-              () <$ bitraverse (goCCS r) goCC ccs'
+    goCCS r cp =
+        let mkey = getMBlockKey (coerce cp)
+        in if (mkey == n)
+            then deref r (CCSPtrWithInfo cp)
+            else go (CCSPtrWithInfo cp)
 
     goCC p = do
       () <$ dereferenceCC p
@@ -204,29 +218,17 @@ handleBlockLevel bk offset m = do
       unless res (writeArray bm offset True)
       return (m, res)
 
-checkClosVisit :: ClosurePtr -> ThreadState s -> IO (ThreadState s, Bool)
-checkClosVisit cp st = do
+checkVisit :: ClosurePtr -> ThreadState s -> IO (ThreadState s, Bool)
+checkVisit cp st = do
   let (mbk, bk, offset) = getKeyTriple cp
-      ThreadState v c ref = st
+      ThreadState v ref = st
   case IM.lookup mbk v of
     Nothing -> do
       (st', res) <- handleBlockLevel bk offset IM.empty
-      return (ThreadState (IM.insert mbk st' v) c ref, res)
+      return (ThreadState (IM.insert mbk st' v) ref, res)
     Just bm -> do
       (st', res) <- handleBlockLevel bk offset bm
-      return (ThreadState (IM.insert mbk st' v) c ref, res)
-
-checkCcsVisit :: CCSPtr -> ThreadState s -> IO (ThreadState s, Bool)
-checkCcsVisit ccsPtr st = do
-  let (mbk, bk, offset) = getKeyTriple $ coerce @CCSPtr @ClosurePtr ccsPtr
-      ThreadState v c ref = st
-  case IM.lookup mbk c of
-    Nothing -> do
-      (st', res) <- handleBlockLevel bk offset IM.empty
-      return (ThreadState v (IM.insert mbk st' c) ref, res)
-    Just bm -> do
-      (st', res) <- handleBlockLevel bk offset bm
-      return (ThreadState v (IM.insert mbk st' c) ref, res)
+      return (ThreadState (IM.insert mbk st' v) ref, res)
 
 data TraceFunctionsIO a s =
       TraceFunctionsIO { papTrace :: !(GenPapPayload ClosurePtr -> DebugM ())
@@ -234,9 +236,9 @@ data TraceFunctionsIO a s =
       , stackTrace :: !(GenStackFrames SrtCont ClosurePtr -> DebugM ())
       , closTrace :: !(ClosurePtr -> SizedClosure -> a -> DebugM (a, s, DebugM () -> DebugM ()))
       , visitedClosVal :: !(ClosurePtr -> a -> DebugM s)
-      , visitedCcsVal :: !(CCSPtr -> DebugM ())
+      , visitedCcsVal :: !(CCSPtr -> DebugM s)
       , conDescTrace :: !(ConstrDesc -> DebugM ())
-      , ccsTrace :: !(CCSPayload -> DebugM ())
+      , ccsTrace :: !(CCSPtr -> CCSPayload -> DebugM s)
       }
 
 
@@ -291,7 +293,7 @@ tracePar = traceParFromM funcs . map (ClosurePtrWithInfo ())
       , visitedClosVal = const (const (return ()))
       , visitedCcsVal = nop
       , conDescTrace = nop
-      , ccsTrace = const (return ())
+      , ccsTrace = const (const (return ()))
       }
 
     stack :: GenStackFrames SrtCont ClosurePtr -> DebugM ()

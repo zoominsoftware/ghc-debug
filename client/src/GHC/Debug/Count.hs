@@ -12,8 +12,9 @@ import Control.Monad.State
 parCount :: [ClosurePtr] -> DebugM CensusStats
 parCount = traceParFromM funcs . map (ClosurePtrWithInfo ())
   where
-    nop = const (return ())
-    funcs = TraceFunctionsIO nop nop nop clos (const (const (return mempty))) nop nop nop
+    nop = const (return mempty)
+    nop2 = const (return mempty)
+    funcs = TraceFunctionsIO nop nop nop clos (const (const (return mempty))) nop2 nop (const nop2)
 
     clos :: ClosurePtr -> SizedClosure -> ()
               -> DebugM ((), CensusStats, DebugM () -> DebugM ())

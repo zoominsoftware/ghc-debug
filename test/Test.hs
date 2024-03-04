@@ -52,6 +52,7 @@ import Data.List.NonEmpty(NonEmpty(..), fromList)
 import Data.Semigroup
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BS
+import GHC.Debug.CostCentres
 
 saveOnePath :: IO FilePath
 saveOnePath = testProgPath "save-one"
@@ -69,9 +70,24 @@ testProgPath progName = do
   where
     shellCmd = shell $ "which " ++ progName
 
-main = withDebuggeeConnect "/tmp/ghc-debug" (\e -> p16 e) --  >> outputRequestLog e)
+main2 = withDebuggeeConnect "/tmp/ghc-debug" (\e -> p_ccs e) --  >> outputRequestLog e)
 
--- main = snapshotRun "/tmp/ghc-debug-cache" (typePointsFromToGML "out.gml") --(tyConAppAnalysis)
+p_ccs e = do
+  pause e
+  -- (a, b, c) <- run e $ do
+  --   ccs1 <- debug_findAllCCS
+  --   ccs2 <- debug_findAllCCSSeq
+  --   ccs3 <- findAllChildrenOfCC (const True)
+  --   return (ccs1, ccs2, ccs3)
+  -- print (S.size a, S.size b, S.size c)
+  run e $ snapshot "agda-now"
+  resume e
+
+main = snapshotRun "agda-now" $ \e -> do
+  retainers <- run e $ do
+    rroots <- gcRoots
+    findRetainersOfConstructor Nothing rroots "UnlinkedBCO"
+  mapM_ (print . head) retainers
 
 
 --
@@ -1074,7 +1090,7 @@ p52 e = forever $ do
   resume e
   threadDelay 100_000
 
-modIface rroots = findRetainersOfConstructor (Just 100) rroots "HomeModInfo" 
+modIface rroots = findRetainersOfConstructor (Just 100) rroots "HomeModInfo"
 
 tyConApp rroots = findRetainersOfConstructor (Just 100) rroots "TyConApp"
 

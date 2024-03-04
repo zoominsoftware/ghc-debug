@@ -1,6 +1,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- | Functions to support the constant space traversal of a heap.
 module GHC.Debug.Trace ( traceFromM, TraceFunctions(..), justClosures ) where
 
@@ -14,6 +15,8 @@ import Control.Monad.Reader
 import Control.Monad
 import Data.IORef
 import Data.Word
+import Data.Bitraversable
+import Data.Coerce
 
 newtype VisitedSet = VisitedSet (IM.IntMap (IOBitArray Word16))
 
@@ -53,11 +56,11 @@ data TraceFunctions m =
       , closTrace :: !(ClosurePtr -> SizedClosure -> m DebugM () -> m DebugM ())
       , visitedVal :: !(ClosurePtr -> (m DebugM) ())
       , conDescTrace :: !(ConstrDesc -> m DebugM ())
-      , ccsTrace :: !(CCSPayload -> m DebugM ())
+      , ccsTrace :: !(CCSPtr -> CCSPayload -> m DebugM ())
       }
 
 justClosures :: C m => (ClosurePtr -> SizedClosure -> m DebugM () -> m DebugM ()) -> TraceFunctions m
-justClosures f = TraceFunctions nop nop nop f nop nop nop
+justClosures f = TraceFunctions nop nop nop f nop nop (const nop)
   where
     nop = const (return ())
 
@@ -113,6 +116,14 @@ traceClosureFromM !k = go
       () <$ traverse go p'
 
     goccs p = do
-      p' <- lift $ lift $ dereferenceCCS p
-      lift $ ccsTrace k p'
+      mref <- ask
+      (mnum_visited, b) <- lift $ lift $ unsafeLiftIO (checkVisit (coerce p) mref)
+      if b
+        then return ()
+        else do
+          p' <- lift $ lift $ dereferenceCCS p
+          lift $ ccsTrace k p p'
+          () <$ bitraverse goccs pure p'
+
+
 

@@ -86,9 +86,9 @@ closureCensusBy f cps = do
               , stackTrace = const (return ())
               , closTrace = closAccum
               , visitedClosVal = const (const (return MMap.empty))
-              , visitedCcsVal = const (return ())
+              , visitedCcsVal = const (return MMap.empty)
               , conDescTrace = const (return ())
-              , ccsTrace = const (return ())
+              , ccsTrace = const (const (return mempty))
             }
     -- Add cos
     closAccum  :: ClosurePtr
