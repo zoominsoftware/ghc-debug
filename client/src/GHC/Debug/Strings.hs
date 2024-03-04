@@ -100,22 +100,33 @@ stringAnalysis rroots = (\(_, r, _) -> r) <$> runRWST (traceFromM funcs rroots) 
             (ConstrClosure _ _ _ _ cd) -> do
               (ConstrDesc _ _ cn) <- dereferenceConDesc cd
               return (cn == "C#")
+            (IndClosure _ _ i) ->
+              process_2 i
             _ -> return False
 
         check_bin (ConstrClosure _ _ [h,_] _ (ConstrDesc _ _ ":")) = process_2 h
+        check_bin (IndClosure _ _ i) = do
+          sizedI <- dereferenceClosure i
+          clos' <- hextraverse pure pure pure dereferenceConDesc return return (noSize sizedI)
+          check_bin clos'
         check_bin _ = return False
 
 decodeString :: ClosurePtr -> DebugM String
 decodeString cp = do
   cp' <- dereferenceClosure cp
   case noSize cp' of
+    (IndClosure _ _ i) -> decodeString i
     (ConstrClosure _ _ [p,ps] _ _) -> do
-      cp'' <- dereferenceClosure p
-      case noSize cp'' of
-        (ConstrClosure _ _ _ [w] _) -> do
-          (chr (fromIntegral w):) <$> decodeString ps
-        _ -> return []
+      go p ps
     _ -> return []
+    where
+  go headp tailp = do
+    cp'' <- dereferenceClosure headp
+    case noSize cp'' of
+      (IndClosure _ _ i) -> go i tailp
+      (ConstrClosure _ _ _ [w] _) -> do
+        (chr (fromIntegral w):) <$> decodeString tailp
+      _ -> return []
 
 
 printResult :: Show a => Map.Map a Count -> IO [a]
