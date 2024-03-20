@@ -903,7 +903,7 @@ dispatchFooterInput dbg FArrWordsSize form                  = filterOrRun dbg fo
 dispatchFooterInput dbg (FFilterEras runf invert) form       = filterOrRun dbg form runf (parseEraRange . T.pack) (pure . UIEraFilter invert)
 dispatchFooterInput dbg (FFilterClosureSize invert) form = filterOrRun dbg form False readMaybe (pure . UISizeFilter invert)
 dispatchFooterInput dbg (FFilterClosureType invert) form = filterOrRun dbg form False readMaybe (pure . UIClosureTypeFilter invert)
-dispatchFooterInput dbg (FFilterCcId invert runf) form = filterOrRun dbg form runf readMaybe (pure . UICcId invert)
+dispatchFooterInput dbg (FFilterCcId runf invert) form = filterOrRun dbg form runf readMaybe (pure . UICcId invert)
 dispatchFooterInput dbg FProfile form = do
    os <- get
    asyncAction_ "Writing profile" os $ profile dbg (T.unpack (formState form))
