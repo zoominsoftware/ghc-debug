@@ -70,6 +70,7 @@ module Lib
 
     -- * Profiling
   , profile
+  , GD.CensusStats(..)
 
     -- * Retainers
   , retainersOf
@@ -244,12 +245,13 @@ savedClosures e = run e $ do
             closurePtrs
             closures
 
-profile :: Debuggee -> FilePath -> IO ()
+profile :: Debuggee -> FilePath -> IO (Map.Map Text GD.CensusStats)
 profile dbg fp = do
   c <- run dbg $ do
     roots <- GD.gcRoots
     GD.censusClosureType roots
   GD.writeCensusByClosureType fp c
+  return c
 
 snapshot :: Debuggee -> FilePath -> IO ()
 snapshot dbg fp = do

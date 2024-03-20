@@ -47,6 +47,9 @@ import qualified Data.Set as S
 import qualified Data.Foldable as F
 import Text.Read (readMaybe)
 
+import GHC.Debug.Profile.Types
+import Data.Semigroup
+
 import GHC.Debug.Types.Ptr(readInfoTablePtr, arrWordsBS)
 import qualified GHC.Debug.Types.Closures as Debug
 import IOTree
@@ -268,7 +271,7 @@ footer :: Int -> Maybe Int -> FooterMode -> Widget Name
 footer n m fmode = vLimit 1 $
  case fmode of
    FooterMessage t -> withAttr menuAttr $ hBox [txt t, fill ' ']
-   FooterInfo -> withAttr menuAttr $ hBox $ [padRight Max $ txt "(↑↓): select item | (→): expand | (←): collapse | (^p): command picker | (^g): invert filter | (?): full keybindings"]
+   FooterInfo -> withAttr menuAttr $ hBox $ [padRight Brick.Max $ txt "(↑↓): select item | (→): expand | (←): collapse | (^p): command picker | (^g): invert filter | (?): full keybindings"]
                                          ++ [padLeft (Pad 1) $ txt $
                                                (T.pack (show n) <> " items/" <> maybe "∞" (T.pack . show) m <> " max")]
    FooterInput _im form -> renderForm form
@@ -890,6 +893,16 @@ filterOrRunM dbg form doRun parse createFilterM = do
         modify $ (resetFooter . addFilters newFilter)
     Nothing -> modify resetFooter
 
+data ProfileLine  = ProfileLine Text CensusStats
+
+renderProfileLine :: ProfileLine -> [Widget Name]
+renderProfileLine (ProfileLine bs c@CS{..}) =
+ [txtLabel bs, txt " ",  txt (T.pack (showLine c))]
+  where
+    showLine :: CensusStats -> String
+    showLine (CS (Count n) (Size s) (Data.Semigroup.Max (Size mn))) =
+      (concat :: [String] -> String)  [show s,":", show n, ":", show mn,":", show @Double (fromIntegral s / fromIntegral n)]
+
 -- | What happens when we press enter in footer input mode
 dispatchFooterInput :: Debuggee
                     -> FooterInputMode
@@ -906,7 +919,24 @@ dispatchFooterInput dbg (FFilterClosureType invert) form = filterOrRun dbg form 
 dispatchFooterInput dbg (FFilterCcId runf invert) form = filterOrRun dbg form runf readMaybe (pure . UICcId invert)
 dispatchFooterInput dbg FProfile form = do
    os <- get
-   asyncAction_ "Writing profile" os $ profile dbg (T.unpack (formState form))
+
+   asyncAction "Writing profile" os (profile dbg (T.unpack (formState form))) $ \res -> do
+    let top_closure = Prelude.reverse [ProfileLine k v  | (k, v) <- (List.sortBy (comparing (cssize . snd)) (M.toList res))]
+
+
+        g_children d (ProfileLine {}) = pure []
+
+        renderHeaderPane (ProfileLine t (CS (Count n) (Size s) (Data.Semigroup.Max (Size mn)))) = vBox $ [txt t
+                                             , txt "Count: " <+> txt (T.pack (show n))
+                                             , txt "Size: " <+> txt (T.pack (show s))
+                                             , txt "Max: " <+> txt (T.pack (show mn))
+                                             , txt "Average: " <+> txt (T.pack (show @Double (fromIntegral s / fromIntegral n)))
+                                             ]
+
+        tree = mkIOTree dbg top_closure g_children renderProfileLine id
+    put (os & resetFooter
+            & treeMode .~ Searched renderHeaderPane tree
+        )
 dispatchFooterInput _ FDumpArrWords form = do
    os <- get
    let act node = asyncAction_ "dumping ARR_WORDS payload" os $
