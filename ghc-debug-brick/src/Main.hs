@@ -745,6 +745,7 @@ commandList =
   , mkCommand  "Dump ARR_WORDS payload"            (withCtrlKey 'j') (setFooterInputMode FDumpArrWords)
   , mkCommand  "Write Profile"                     (withCtrlKey 'b') (setFooterInputMode (FProfile OneLevel))
   , mkCommand'  "Write Profile (2 level)"          (setFooterInputMode (FProfile TwoLevel))
+  , Command  "Thunk Analysis"                      Nothing thunkAnalysisAction NoReq
   , mkCommand  "Take Snapshot"                     (withCtrlKey 'x') (setFooterInputMode FSnapshot)
   , Command "ARR_WORDS Count" Nothing arrWordsAction NoReq
   ] <> addFilterCommands
@@ -859,6 +860,32 @@ arrWordsAction dbg = do
         renderHeaderPane (FieldLine c) = renderClosureDetails c
 
         tree = mkIOTree dbg top_closure g_children renderArrWordsLines id
+    put (os & resetFooter
+            & treeMode .~ Searched renderHeaderPane tree
+        )
+
+data ThunkLine = ThunkLine (Maybe SourceInformation) Count
+
+thunkAnalysisAction :: Debuggee -> EventM n OperationalState ()
+thunkAnalysisAction dbg = do
+  os <- get
+  -- TODO: Does not honour search limit at all
+  asyncAction "Counting thunks" os (thunkAnalysis dbg) $ \res -> do
+    let top_closure = Prelude.reverse [ ThunkLine k v | (k, v) <- (List.sortBy (comparing (getCount . snd)) (M.toList res))]
+
+        g_children _ (ThunkLine {}) = pure []
+
+        renderHeaderPane (ThunkLine sc c) = vBox $
+          maybe [txt "NoLoc"] renderSourceInformation sc
+          ++ [ txtWrap (T.pack ("Count: " ++ show (getCount c))) ]
+
+        renderInline (ThunkLine msc (Count c)) =
+          [(case msc of
+              Just sc -> txtLabel (T.pack (infoPosition sc))
+              Nothing -> txtLabel "NoLoc"), txt " ", txt (T.pack (show c)) ]
+
+
+        tree = mkIOTree dbg top_closure g_children renderInline id
     put (os & resetFooter
             & treeMode .~ Searched renderHeaderPane tree
         )

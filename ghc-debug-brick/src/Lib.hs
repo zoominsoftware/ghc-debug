@@ -70,6 +70,7 @@ module Lib
 
     -- * Profiling
   , profile
+  , thunkAnalysis
   , GD.CensusStats(..)
 
     -- * Retainers
@@ -128,6 +129,7 @@ import qualified GHC.Debug.Snapshot as GD
 import qualified GHC.Debug.Strings as GD
 import qualified GHC.Debug.Types.Version as GD
 import qualified GHC.Debug.Types.Graph as HG
+import qualified GHC.Debug.Thunks as GD
 import Control.Monad
 import System.FilePath
 import System.Directory
@@ -255,6 +257,15 @@ profile dbg lvl fp = do
       TwoLevel -> GD.census2LevelClosureType roots
   GD.writeCensusByClosureType fp c
   return c
+
+thunkAnalysis :: Debuggee -> IO (Map.Map (Maybe SourceInformation) GD.Count)
+thunkAnalysis dbg = do
+  c <- run dbg $ do
+    roots <- GD.gcRoots
+    GD.thunkAnalysis roots
+  return c
+
+
 
 snapshot :: Debuggee -> FilePath -> IO ()
 snapshot dbg fp = do

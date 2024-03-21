@@ -5,7 +5,7 @@ import           GHC.Debug.Types
 import Data.Monoid
 import Data.Semigroup
 
-newtype Count = Count Int
+newtype Count = Count {getCount :: Int }
                 deriving (Semigroup, Monoid, Num) via Sum Int
                 deriving (Show, Ord, Eq)
 
