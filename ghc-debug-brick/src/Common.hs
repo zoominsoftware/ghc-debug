@@ -7,6 +7,8 @@ import qualified Brick.Types as T
 import Lens.Micro
 import Namespace
 
+data ProfileLevel = OneLevel | TwoLevel deriving Show
+
 type Handler e s =
      T.BrickEvent Name e
   -> T.EventM Name s ()

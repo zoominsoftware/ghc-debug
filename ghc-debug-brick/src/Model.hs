@@ -155,7 +155,7 @@ data FooterInputMode = FClosureAddress {runNow :: Bool, invert :: Bool}
                      | FFilterClosureType {invert :: Bool}
                      | FFilterClosureSize {invert :: Bool}
                      | FFilterCcId {runNow :: Bool, invert :: Bool}
-                     | FProfile
+                     | FProfile ProfileLevel
                      | FSnapshot
                      | FDumpArrWords
                      | FSetResultSize
@@ -230,7 +230,7 @@ formatFooterMode FArrWordsSize = "size (bytes)>= "
 formatFooterMode FDumpArrWords = "dump payload to file: "
 formatFooterMode FSetResultSize = "search result limit (0 for infinity): "
 formatFooterMode FSnapshot = "snapshot name: "
-formatFooterMode FProfile = "filename: "
+formatFooterMode (FProfile {}) = "filename: "
 
 data ConnectedMode
   -- | Debuggee is running

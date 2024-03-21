@@ -139,6 +139,7 @@ import qualified Data.ByteString.Lazy as BS
 import qualified Data.Set as Set
 import Data.Int
 import GHC.Debug.Client.Monad (DebugM)
+import Common
 
 initialTraversal :: Debuggee -> IO (HG.HeapGraph Size)
 initialTraversal e = run e $ do
@@ -245,11 +246,13 @@ savedClosures e = run e $ do
             closurePtrs
             closures
 
-profile :: Debuggee -> FilePath -> IO (Map.Map Text GD.CensusStats)
-profile dbg fp = do
+profile :: Debuggee -> ProfileLevel -> FilePath -> IO (Map.Map Text GD.CensusStats)
+profile dbg lvl fp = do
   c <- run dbg $ do
     roots <- GD.gcRoots
-    GD.censusClosureType roots
+    case lvl of
+      OneLevel -> GD.censusClosureType roots
+      TwoLevel -> GD.census2LevelClosureType roots
   GD.writeCensusByClosureType fp c
   return c
 

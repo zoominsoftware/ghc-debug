@@ -743,7 +743,8 @@ commandList =
   , mkFilterCmd "Find closures by era"             (withCtrlKey 'v') (setFooterInputMode (FFilterEras True False)) ReqErasProfiling
   , mkCommand  "Find Retainers of large ARR_WORDS" (withCtrlKey 'u') (setFooterInputMode FArrWordsSize)
   , mkCommand  "Dump ARR_WORDS payload"            (withCtrlKey 'j') (setFooterInputMode FDumpArrWords)
-  , mkCommand  "Write Profile"                     (withCtrlKey 'b') (setFooterInputMode FProfile)
+  , mkCommand  "Write Profile"                     (withCtrlKey 'b') (setFooterInputMode (FProfile OneLevel))
+  , mkCommand'  "Write Profile (2 level)"          (setFooterInputMode (FProfile TwoLevel))
   , mkCommand  "Take Snapshot"                     (withCtrlKey 'x') (setFooterInputMode FSnapshot)
   , Command "ARR_WORDS Count" Nothing arrWordsAction NoReq
   ] <> addFilterCommands
@@ -917,10 +918,10 @@ dispatchFooterInput dbg (FFilterEras runf invert) form       = filterOrRun dbg f
 dispatchFooterInput dbg (FFilterClosureSize invert) form = filterOrRun dbg form False readMaybe (pure . UISizeFilter invert)
 dispatchFooterInput dbg (FFilterClosureType invert) form = filterOrRun dbg form False readMaybe (pure . UIClosureTypeFilter invert)
 dispatchFooterInput dbg (FFilterCcId runf invert) form = filterOrRun dbg form runf readMaybe (pure . UICcId invert)
-dispatchFooterInput dbg FProfile form = do
+dispatchFooterInput dbg (FProfile lvl) form = do
    os <- get
 
-   asyncAction "Writing profile" os (profile dbg (T.unpack (formState form))) $ \res -> do
+   asyncAction "Writing profile" os (profile dbg lvl (T.unpack (formState form))) $ \res -> do
     let top_closure = Prelude.reverse [ProfileLine k v  | (k, v) <- (List.sortBy (comparing (cssize . snd)) (M.toList res))]
 
 
