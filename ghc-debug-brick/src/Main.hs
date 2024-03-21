@@ -1041,7 +1041,7 @@ myAppAttrMap _appState =
     , (labelAttr, Vty.withStyle (fg Vty.white) Vty.bold)
     , (highlightAttr, Vty.black `on` Vty.yellow)
     , (treeAttr, fg Vty.red)
-    , (disabledMenuAttr, Vty.withStyle (Vty.cyan `on` Vty.blue) Vty.bold)
+    , (disabledMenuAttr, Vty.withStyle (Vty.red `on` Vty.blue) Vty.bold)
     ]
 
 menuAttr :: AttrName
