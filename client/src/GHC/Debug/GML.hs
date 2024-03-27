@@ -101,7 +101,7 @@ writeTpfToGML path tpf infoMap = do
             <> "]\n"
 
         gmlShowCensus :: CensusStats -> String
-        gmlShowCensus (CS (Count c) (Size s) (Max (Size m))) =
+        gmlShowCensus (CS (Count c) (Size s) (Max (Size m)) _) =
           "count " <> show c <> "\n"
           <> "size " <> show s <> "\n"
           <> "max " <> show m <> "\n"

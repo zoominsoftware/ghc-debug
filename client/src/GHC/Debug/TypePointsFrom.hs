@@ -82,7 +82,7 @@ typePointsFrom cs = traceParFromM funcs (map (ClosurePtrWithInfo Root) cs)
     visit cp ctx = do
       sc <- dereferenceClosure cp
       let k = tableId $ info (noSize sc)
-          v = mkCS (dcSize sc)
+          v = mkCS cp (dcSize sc)
           parent_edge = case ctx of
                           Root -> []
                           Parent pk -> [(Edge k pk, v)]
@@ -92,11 +92,11 @@ typePointsFrom cs = traceParFromM funcs (map (ClosurePtrWithInfo Root) cs)
 
     clos :: ClosurePtr -> SizedClosure -> Context
               -> DebugM (Context, TypePointsFrom, DebugM () -> DebugM ())
-    clos _cp sc ctx = do
+    clos cp sc ctx = do
       let k = tableId $ info (noSize sc)
       let s :: Size
           s = dcSize sc
-          v =  mkCS s
+          v =  mkCS cp s
 
           -- Edges point from the object TO what retains it
           parent_edge = case ctx of

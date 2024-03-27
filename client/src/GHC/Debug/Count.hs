@@ -17,13 +17,13 @@ parCount = traceParFromM funcs . map (ClosurePtrWithInfo ())
 
     clos :: ClosurePtr -> SizedClosure -> ()
               -> DebugM ((), CensusStats, DebugM () -> DebugM ())
-    clos _cp sc _ = do
-      return ((), mkCS (dcSize sc), id)
+    clos cp sc _ = do
+      return ((), mkCS cp (dcSize sc), id)
 
 -- | Simple statistics about a heap, total objects, size and maximum object
 -- size
 count :: [ClosurePtr] -> DebugM CensusStats
-count cps = snd <$> runStateT (traceFromM funcs cps) (CS 0 0 0)
+count cps = snd <$> runStateT (traceFromM funcs cps) mempty
   where
     funcs = justClosures closAccum
 
@@ -31,9 +31,9 @@ count cps = snd <$> runStateT (traceFromM funcs cps) (CS 0 0 0)
                -> SizedClosure
                ->  (StateT CensusStats DebugM) ()
                ->  (StateT CensusStats DebugM) ()
-    closAccum _cp s k = do
-      modify' (go s)
+    closAccum cp s k = do
+      modify' (go cp s)
       k
 
-    go :: SizedClosure -> CensusStats -> CensusStats
-    go sc cs = mkCS (dcSize sc) <> cs
+    go :: ClosurePtr -> SizedClosure -> CensusStats -> CensusStats
+    go cp sc cs = mkCS cp (dcSize sc) <> cs

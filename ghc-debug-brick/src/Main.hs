@@ -56,6 +56,7 @@ import IOTree
 import Lib as GD
 import Model
 import Data.ByteString.Lazy (ByteString)
+import Data.ByteUnits
 
 
 drawSetup :: Text -> Text -> GenericList Name Seq.Seq SocketInfo -> Widget Name
@@ -266,14 +267,19 @@ renderCCPayload Debug.CCPayload{..} =
   , labelled "Is CAF" $ vLimit 1 (str $ show ccIsCaf)
   ]
 
+renderBytes :: Real a => a -> Widget n
+renderBytes n =
+  str (getShortHand (getAppropriateUnits (ByteValue (realToFrac n) Bytes)))
+
+
 
 footer :: Int -> Maybe Int -> FooterMode -> Widget Name
 footer n m fmode = vLimit 1 $
  case fmode of
    FooterMessage t -> withAttr menuAttr $ hBox [txt t, fill ' ']
    FooterInfo -> withAttr menuAttr $ hBox $ [padRight Brick.Max $ txt "(↑↓): select item | (→): expand | (←): collapse | (^p): command picker | (^g): invert filter | (?): full keybindings"]
-                                         ++ [padLeft (Pad 1) $ txt $
-                                               (T.pack (show n) <> " items/" <> maybe "∞" (T.pack . show) m <> " max")]
+                                         ++ [padLeft (Pad 1) $ str $
+                                               (show n <> " items/" <> maybe "∞" show m <> " max")]
    FooterInput _im form -> renderForm form
 
 footerInput :: FooterInputMode -> FooterMode
@@ -748,6 +754,7 @@ commandList =
   , Command  "Thunk Analysis"                      Nothing thunkAnalysisAction NoReq
   , mkCommand  "Take Snapshot"                     (withCtrlKey 'x') (setFooterInputMode FSnapshot)
   , Command "ARR_WORDS Count" Nothing arrWordsAction NoReq
+  , Command "Strings Count" Nothing stringsAction NoReq
   ] <> addFilterCommands
   where
     setFooterInputMode m = modify $ footerMode .~ footerInput m
@@ -831,23 +838,17 @@ inputFooterHandler dbg m form _k re@(VtyEvent e) =
           zoom (lens (const form) (\ os form' -> set footerMode (FooterInput m form') os)) (handleFormEvent re)
 inputFooterHandler _ _ _ k re = k re
 
-
-data ArrWordsLine = CountLine ByteString Int | FieldLine ClosureDetails
-
-renderArrWordsLines :: ArrWordsLine -> [Widget n]
-renderArrWordsLines (CountLine k n) = [txtLabel (T.pack (show n)), txtWrap (T.pack (show k))]
-renderArrWordsLines (FieldLine cd) = renderInlineClosureDesc cd
-
-arrWordsAction :: Debuggee -> EventM n OperationalState ()
-arrWordsAction dbg = do
+stringsAction :: Debuggee -> EventM n OperationalState ()
+stringsAction dbg = do
   os <- get
   -- TODO: Does not honour search limit at all
-  asyncAction "Counting ARR_WORDS" os (arrWordsAnalysis Nothing dbg) $ \res -> do
-    let sorted_res = take 100 $ Prelude.reverse [(k, S.toList v ) | (k, v) <- (List.sortBy (comparing (S.size . snd)) (M.toList res))]
+  asyncAction "Counting strings" os (stringsAnalysis Nothing dbg) $ \res -> do
+    let cmp (k, v) = length k * (S.size v)
+    let sorted_res = maybe id take (_resultSize os) $ Prelude.reverse [(k, S.toList v ) | (k, v) <- (List.sortBy (comparing (S.size . snd)) (M.toList res))]
 
-        top_closure = [CountLine k (length v) | (k, v) <- sorted_res]
+        top_closure = [CountLine k (length k) (length v) | (k, v) <- sorted_res]
 
-        g_children d (CountLine b _) = do
+        g_children d (CountLine b _ _) = do
           let Just cs = M.lookup b res
           cs' <- run dbg $ forM (S.toList cs) $ \c -> do
             c' <- GD.dereferenceClosure c
@@ -856,12 +857,81 @@ arrWordsAction dbg = do
           mapM (\(lbl, child) -> FieldLine <$> getClosureDetails d (pack lbl) child) children'
         g_children d (FieldLine c) = map FieldLine <$> getChildren d c
 
-        renderHeaderPane (CountLine b _) = txtWrap (T.pack (show b))
+        renderHeaderPane (CountLine b _ _) = strWrap (show b)
         renderHeaderPane (FieldLine c) = renderClosureDetails c
 
         tree = mkIOTree dbg top_closure g_children renderArrWordsLines id
     put (os & resetFooter
             & treeMode .~ Searched renderHeaderPane tree
+        )
+
+
+data ArrWordsLine k = CountLine k Int Int | FieldLine ClosureDetails
+
+
+
+renderArrWordsLines :: Show a => ArrWordsLine a -> [Widget n]
+renderArrWordsLines (CountLine k l n) = [strLabel (show n), txt " ", renderBytes l, txt " ", strWrap (take 100 $ show k)]
+renderArrWordsLines (FieldLine cd) = renderInlineClosureDesc cd
+
+-- | Render a histogram with n lines which displays the number of elements in each bucket,
+-- and how much they contribute to the total size.
+histogram :: Int -> [GD.Size] -> Widget Name
+histogram boxes m =
+  vBox $ map displayLine (bin 0 (map calcPercentage (List.sort m )))
+  where
+    Size maxSize = maximum m
+
+    calcPercentage (Size tot) =
+      (tot, (fromIntegral tot/ fromIntegral maxSize) * 100 :: Double)
+
+    displayLine (l, h, n, tot) =
+      str (show l) <+> txt "%-" <+> str (show h) <+> str "%: " <+> str (show n) <+> str " " <+> renderBytes tot
+
+    step = fromIntegral (ceiling @Double @Int (100 / fromIntegral boxes))
+
+    bin _ [] = []
+    bin k xs = case now of
+                 [] -> bin (k + step) later
+                 _ -> (k, k+step, length now, sum (map fst now)) : bin (k + step) later
+      where
+        (now, later) = span ((<= k + step) . snd) xs
+
+
+arrWordsAction :: Debuggee -> EventM n OperationalState ()
+arrWordsAction dbg = do
+  os <- get
+  asyncAction "Counting ARR_WORDS" os (arrWordsAnalysis Nothing dbg) $ \res -> do
+    let all_res = Prelude.reverse [(k, S.toList v ) | (k, v) <- (List.sortBy (comparing (\(k, v) -> fromIntegral (BS.length k) * S.size v)) (M.toList res))]
+
+        display_res = maybe id take (_resultSize os) all_res
+
+        top_closure = [CountLine k (fromIntegral (BS.length k)) (length v) | (k, v) <- display_res]
+
+        !words_histogram = histogram 8 (concatMap (\(k, bs) -> let sz = BS.length k in replicate (length bs) (Size (fromIntegral sz))) all_res)
+
+        g_children d (CountLine b _ _) = do
+          let Just cs = M.lookup b res
+          cs' <- run dbg $ forM (S.toList cs) $ \c -> do
+            c' <- GD.dereferenceClosure c
+            return $ ListFullClosure $ Closure c c'
+          children' <- traverse (traverse (fillListItem d)) $ zipWith (\n c -> (show @Int n, c)) [0..] cs'
+          mapM (\(lbl, child) -> FieldLine <$> getClosureDetails d (pack lbl) child) children'
+        g_children d (FieldLine c) = map FieldLine <$> getChildren d c
+
+        renderHeaderPane (CountLine b l n) = (vBox $
+          [ txt "Count: " <+> str (show n)
+          , txt "Size: " <+> renderBytes l
+          , txt "Total Size: " <+> renderBytes (n * l)
+          , strWrap (take 100 $ show b)])
+        renderHeaderPane (FieldLine c) = renderClosureDetails c
+
+        renderWithHistogram c = joinBorders (renderHeaderPane c <+>
+          (borderWithLabel (txt "Histogram") $ hLimit 100 $ words_histogram))
+
+        tree = mkIOTree dbg top_closure g_children renderArrWordsLines id
+    put (os & resetFooter
+            & treeMode .~ Searched renderWithHistogram tree
         )
 
 data ThunkLine = ThunkLine (Maybe SourceInformation) Count
@@ -877,12 +947,12 @@ thunkAnalysisAction dbg = do
 
         renderHeaderPane (ThunkLine sc c) = vBox $
           maybe [txt "NoLoc"] renderSourceInformation sc
-          ++ [ txtWrap (T.pack ("Count: " ++ show (getCount c))) ]
+          ++ [ strWrap ("Count: " ++ show (getCount c)) ]
 
         renderInline (ThunkLine msc (Count c)) =
           [(case msc of
-              Just sc -> txtLabel (T.pack (infoPosition sc))
-              Nothing -> txtLabel "NoLoc"), txt " ", txt (T.pack (show c)) ]
+              Just sc -> strLabel (infoPosition sc)
+              Nothing -> txtLabel "NoLoc"), txt " ", str (show c) ]
 
 
         tree = mkIOTree dbg top_closure g_children renderInline id
@@ -921,14 +991,15 @@ filterOrRunM dbg form doRun parse createFilterM = do
         modify $ (resetFooter . addFilters newFilter)
     Nothing -> modify resetFooter
 
-data ProfileLine  = ProfileLine Text CensusStats
+data ProfileLine  = ProfileLine Text CensusStats | ClosureLine ClosureDetails
 
 renderProfileLine :: ProfileLine -> [Widget Name]
-renderProfileLine (ProfileLine bs c@CS{..}) =
- [txtLabel bs, txt " ",  txt (T.pack (showLine c))]
+renderProfileLine (ClosureLine c) = renderInlineClosureDesc c
+renderProfileLine (ProfileLine bs c) =
+ [txtLabel bs, txt " ",  str (showLine c)]
   where
     showLine :: CensusStats -> String
-    showLine (CS (Count n) (Size s) (Data.Semigroup.Max (Size mn))) =
+    showLine (CS (Count n) (Size s) (Data.Semigroup.Max (Size mn)) _) =
       (concat :: [String] -> String)  [show s,":", show n, ":", show mn,":", show @Double (fromIntegral s / fromIntegral n)]
 
 -- | What happens when we press enter in footer input mode
@@ -951,19 +1022,33 @@ dispatchFooterInput dbg (FProfile lvl) form = do
    asyncAction "Writing profile" os (profile dbg lvl (T.unpack (formState form))) $ \res -> do
     let top_closure = Prelude.reverse [ProfileLine k v  | (k, v) <- (List.sortBy (comparing (cssize . snd)) (M.toList res))]
 
+        total_stats = foldMap snd (M.toList res)
 
-        g_children d (ProfileLine {}) = pure []
+        g_children d (ClosureLine c) = map ClosureLine <$> getChildren d c
+        g_children d (ProfileLine _ stats) = do
+          let cs = getSamples (sample stats)
+          cs' <- run dbg $ forM cs $ \c -> do
+            c' <- GD.dereferenceClosure c
+            return $ ListFullClosure $ Closure c c'
+          children' <- traverse (traverse (fillListItem d)) $ zipWith (\n c -> (show @Int n, c)) [0..] cs'
+          mapM (\(lbl, child) -> ClosureLine <$> getClosureDetails d (pack lbl) child) children'
 
-        renderHeaderPane (ProfileLine t (CS (Count n) (Size s) (Data.Semigroup.Max (Size mn)))) = vBox $ [txt t
-                                             , txt "Count: " <+> txt (T.pack (show n))
-                                             , txt "Size: " <+> txt (T.pack (show s))
-                                             , txt "Max: " <+> txt (T.pack (show mn))
-                                             , txt "Average: " <+> txt (T.pack (show @Double (fromIntegral s / fromIntegral n)))
+        renderHeaderPane (ClosureLine cs) = renderClosureDetails cs
+        renderHeaderPane (ProfileLine t (CS (Count n) (Size s) (Data.Semigroup.Max (Size mn)) _)) = vBox $ [txt t
+                                             , txt "Count: " <+> str (show n)
+                                             , txt "Size: " <+> renderBytes s
+                                             , txt "Max: " <+> renderBytes mn
+                                             , txt "Average: " <+> renderBytes @Double (fromIntegral s / fromIntegral n)
                                              ]
+
+        renderWithStats l = renderHeaderPane l <+>
+          (padRight Brick.Max $ renderHeaderPane (ProfileLine "Total" total_stats))
+
+
 
         tree = mkIOTree dbg top_closure g_children renderProfileLine id
     put (os & resetFooter
-            & treeMode .~ Searched renderHeaderPane tree
+            & treeMode .~ Searched renderWithStats tree
         )
 dispatchFooterInput _ FDumpArrWords form = do
    os <- get
@@ -1064,6 +1149,9 @@ disabledMenuAttr = attrName "disabledMenu"
 
 txtLabel :: Text -> Widget n
 txtLabel = withAttr labelAttr . txt
+
+strLabel :: String -> Widget n
+strLabel = withAttr labelAttr . str
 
 highlighted :: Widget n -> Widget n
 highlighted = forceAttr highlightAttr

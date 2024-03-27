@@ -54,12 +54,12 @@ censusClosureType :: [ClosurePtr] -> DebugM CensusByClosureType
 censusClosureType = closureCensusBy go
   where
     go :: ClosurePtr -> SizedClosure
-       -> DebugM (Maybe (Text, CensusStats))
-    go _ s = do
+       -> DebugM (Maybe (Text, CensusStats ))
+    go cp s = do
       d <- hextraverse pure pure pure dereferenceConDesc pure pure s
       let siz :: Size
           siz = dcSize d
-          v =  mkCS siz
+          v =  mkCS cp siz
       return $ Just (closureToKey (noSize d), v)
 
 
@@ -112,21 +112,21 @@ census2LevelClosureType cps = snd <$> runStateT (traceFromM funcs cps) Map.empty
                -> SizedClosure
                -> (StateT CensusByClosureType DebugM) ()
                -> (StateT CensusByClosureType DebugM) ()
-    closAccum _ s k = do
+    closAccum cp s k = do
       s' <- lift $ hextraverse pure dereferenceSRT dereferencePapPayload dereferenceConDesc (bitraverse dereferenceSRT pure <=< dereferenceStack) pure s
       pts <- lift $ mapM dereferenceClosure (allClosures (noSize s'))
       pts' <- lift $ mapM (hextraverse pure pure pure dereferenceConDesc pure pure) pts
 
 
-      modify' (go s' pts')
+      modify' (go cp s' pts')
       k
 
-    go d args =
+    go cp d args =
       let k = closureToKey (noSize d)
           kargs = map (closureToKey . noSize) args
           final_k :: Text
           !final_k = k <> "[" <> T.intercalate "," kargs <> "]"
-      in Map.insertWith (<>) final_k (mkCS (dcSize d))
+      in Map.insertWith (<>) final_k (mkCS cp (dcSize d))
 
 {-
 -- | Parallel heap census
@@ -152,7 +152,7 @@ parCensus bs cs =  do
 writeCensusByClosureType :: FilePath -> CensusByClosureType -> IO ()
 writeCensusByClosureType outpath c = do
   let res = sortBy (flip (comparing (cssize . snd))) (Map.toList c)
-      showLine (k, CS (Count n) (Size s) (Max (Size mn))) =
+      showLine (k, CS (Count n) (Size s) (Max (Size mn)) _) =
         concat [unpack k, ":", show s,":", show n, ":", show mn,":", show @Double (fromIntegral s / fromIntegral n)]
   writeFile outpath (unlines $ "key, total, count, max, avg" : map showLine res)
 

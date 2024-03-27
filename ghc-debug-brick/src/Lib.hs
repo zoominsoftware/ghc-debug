@@ -79,6 +79,7 @@ module Lib
 
   -- * Counting
   , arrWordsAnalysis
+  , stringsAnalysis
 
     -- * Snapshot
   , snapshot
@@ -291,6 +292,13 @@ arrWordsAnalysis mroots dbg = do
   run dbg $ do
     roots <- maybe GD.gcRoots return mroots
     arr_words <- GD.arrWordsAnalysis roots
+    return arr_words
+
+stringsAnalysis :: Maybe [ClosurePtr] -> Debuggee -> IO (Map.Map String (Set.Set ClosurePtr))
+stringsAnalysis mroots dbg = do
+  run dbg $ do
+    roots <- maybe GD.gcRoots return mroots
+    arr_words <- GD.stringAnalysis roots
     return arr_words
 
 -- -- | Request the description for an info table.

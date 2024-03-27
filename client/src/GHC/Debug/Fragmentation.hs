@@ -47,7 +47,7 @@ censusByMBlock = closureCensusBy go
     go cp d =
       let s :: Size
           s = dcSize d
-          v =  mkCS s
+          v =  mkCS cp s
 
           k :: BlockPtr
           k = applyMBlockMask cp
@@ -63,7 +63,7 @@ censusByBlock = closureCensusBy go
     go cp d =
       let s :: Size
           s = dcSize d
-          v =  mkCS s
+          v =  mkCS cp s
 
           k = applyBlockMask cp
       in if heapAlloced cp
@@ -86,7 +86,7 @@ censusPinnedBlocks bs = closureCensusBy go
           -> DebugM (Maybe (BlockPtr, PinnedCensusStats))
     go cp d =
       let v :: CensusStats
-          v = mkCS (dcSize d)
+          v = mkCS cp (dcSize d)
 
           bp = applyBlockMask cp
 
@@ -102,7 +102,7 @@ censusPinnedBlocks bs = closureCensusBy go
 findBadPtrs :: Map.Map k PinnedCensusStats
             -> [((Count, [ClosurePtr]), String)]
 findBadPtrs mb_census  =
-      let fragged_blocks = Map.filter (\(PinnedCensusStats (CS _ (Size s) _, _)) -> fromIntegral s / fromIntegral blockMaxSize <= (0.1 :: Double))  mb_census
+      let fragged_blocks = Map.filter (\(PinnedCensusStats (CS _ (Size s) _ _, _)) -> fromIntegral s / fromIntegral blockMaxSize <= (0.1 :: Double))  mb_census
           all_arr_words :: [(String, (Count, [ClosurePtr]))]
           all_arr_words = concatMap (\(PinnedCensusStats (_, i)) -> map (\(c,d) -> (displayArrWords d, (Count 1, [c]))) i) (Map.elems fragged_blocks)
           swap (a, b) = (b, a)
@@ -125,7 +125,7 @@ histogram :: Word64 -> [CensusStats] -> IO ()
 histogram maxSize m =
   mapM_ (putStrLn . displayLine) (bin 0 (map calcPercentage (sortBy (comparing cssize) m )))
   where
-    calcPercentage (CS _ (Size tot) _) =
+    calcPercentage (CS _ (Size tot) _ _) =
       ((fromIntegral tot/ fromIntegral maxSize) * 100 :: Double)
 
     displayLine (l, h, n) = show l ++ "%-" ++ show h ++ "%: " ++ show n
