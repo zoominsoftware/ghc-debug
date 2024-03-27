@@ -485,6 +485,9 @@ mkIOTree debuggee' cs getChildrenGen renderNode sort = ioTree Connected_Paused_C
 era_colors :: [Vty.Color]
 era_colors = [Vty.black, Vty.green, Vty.magenta, Vty.cyan, Vty.yellow, Vty.blue, Vty.red]
 
+grey :: Vty.Color
+grey = Vty.rgbColor 158 158 158
+
 -- | Draw the tree structure around the row item. Inspired by the
 -- 'border' functions in brick.
 --
@@ -1126,7 +1129,7 @@ myAppAttrMap _appState =
     , (labelAttr, Vty.withStyle (fg Vty.white) Vty.bold)
     , (highlightAttr, Vty.black `on` Vty.yellow)
     , (treeAttr, fg Vty.red)
-    , (disabledMenuAttr, Vty.withStyle (Vty.red `on` Vty.blue) Vty.bold)
+    , (disabledMenuAttr, Vty.withStyle (grey `on` Vty.blue) Vty.bold)
     ]
 
 menuAttr :: AttrName
