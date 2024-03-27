@@ -1042,7 +1042,7 @@ dispatchFooterInput dbg (FProfile lvl) form = do
                                              ]
 
         renderWithStats l = renderHeaderPane l <+>
-          (padRight (Pad 1) $ (padLeft Brick.Max $ renderHeaderPane (ProfileLine "Total" total_stats))
+          (padRight (Pad 1) $ (padLeft Brick.Max $ renderHeaderPane (ProfileLine "Total" total_stats)))
 
 
 
