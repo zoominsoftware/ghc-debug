@@ -483,7 +483,7 @@ mkIOTree debuggee' cs getChildrenGen renderNode sort = ioTree Connected_Paused_C
         )
 
 era_colors :: [Vty.Color]
-era_colors = [Vty.black, Vty.green, Vty.magenta, Vty.cyan, Vty.yellow, Vty.blue, Vty.red]
+era_colors = [Vty.Color240 n | n <- [17..230]]
 
 grey :: Vty.Color
 grey = Vty.rgbColor 158 158 158
@@ -571,12 +571,17 @@ renderInlineClosureDesc (CCDetails clabel cc) =
   [ txtLabel clabel, txt "   ", txt (prettyCC cc)]
 renderInlineClosureDesc closureDesc@(ClosureDetails{}) =
                     [ txtLabel (_labelInParent (_info closureDesc))
-                    , txt "   "
-                    , colorEra $ txt $  pack (closureShowAddress (_closure closureDesc))
+                    , colorBar
+                    , txt $  pack (closureShowAddress (_closure closureDesc))
                     , txt "   "
                     , txtWrap $ _pretty (_info closureDesc)
                     ]
   where
+    colorBar =
+      case colorId of
+        Just {} -> padLeftRight 1 (colorEra (txt " "))
+        Nothing -> txt "   "
+
     colorId = _profHeaderInfo $ _info closureDesc
     colorEra = case colorId of
       Just (Debug.EraWord i) -> modifyDefAttr (flip Vty.withBackColor (era_colors !! (1 + (fromIntegral $ abs i) `mod` (length era_colors - 1))))
