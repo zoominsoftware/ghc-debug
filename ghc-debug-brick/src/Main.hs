@@ -58,6 +58,7 @@ import Model
 import Data.ByteUnits
 import Data.Time.Format
 import Data.Time.Clock
+import qualified Numeric
 
 
 drawSetup :: Text -> Text -> GenericList Name Seq.Seq SocketInfo -> Widget Name
@@ -250,9 +251,8 @@ renderClosureDetails (cd@(ClosureDetails {})) =
   vBox $
     renderInfoInfo (_info cd)
     ++
-    [ hBox [
-      txtLabel $ "Exclusive Size   "
-      <> maybe "" (pack . show @Int . GD.getSize) (Just $ _excSize cd) <> " bytes"
+    [ hBox
+      [ txtLabel "Exclusive Size" <+> vSpace <+> txt (maybe "" (pack . show @Int . GD.getSize) (Just $ _excSize cd) <> " bytes")
       ]
     ]
 renderClosureDetails ((LabelNode n)) = txt n
@@ -571,23 +571,23 @@ vreplicate t =
 renderInlineClosureDesc :: ClosureDetails -> [Widget n]
 renderInlineClosureDesc (LabelNode t) = [txtLabel t]
 renderInlineClosureDesc (InfoDetails info') =
-  [txtLabel (_labelInParent info'), txt "   ", txt (_pretty info')]
+  [txtLabel (_labelInParent info'), vSpace, txt (_pretty info')]
 renderInlineClosureDesc (CCSDetails clabel _cptr ccspayload) =
-  [ txtLabel clabel, txt "   ", txt (prettyCCS ccspayload)]
+  [ txtLabel clabel, vSpace, txt (prettyCCS ccspayload)]
 renderInlineClosureDesc (CCDetails clabel cc) =
-  [ txtLabel clabel, txt "   ", txt (prettyCC cc)]
+  [ txtLabel clabel, vSpace, txt (prettyCC cc)]
 renderInlineClosureDesc closureDesc@(ClosureDetails{}) =
                     [ txtLabel (_labelInParent (_info closureDesc))
                     , colorBar
                     , txt $  pack (closureShowAddress (_closure closureDesc))
-                    , txt "   "
+                    , vSpace
                     , txtWrap $ _pretty (_info closureDesc)
                     ]
   where
     colorBar =
       case colorId of
         Just {} -> padLeftRight 1 (colorEra (txt " "))
-        Nothing -> txt "   "
+        Nothing -> vSpace
 
     colorId = _profHeaderInfo $ _info closureDesc
     colorEra = case colorId of
@@ -874,7 +874,12 @@ stringsAction dbg = do
           mapM (\(lbl, child) -> FieldLine <$> getClosureDetails d (pack lbl) child) children'
         g_children d (FieldLine c) = map FieldLine <$> getChildren d c
 
-        renderHeaderPane (CountLine b _ _) = strWrap (show b)
+        renderHeaderPane (CountLine k l n) = vBox
+          [ txtLabel "Count     " <+> vSpace <+> str (show n)
+          , txtLabel "Size      " <+> vSpace <+> renderBytes l
+          , txtLabel "Total Size" <+> vSpace <+> renderBytes (n * l)
+          , strWrap (take 100 $ show k)
+          ]
         renderHeaderPane (FieldLine c) = renderClosureDetails c
 
         tree = mkIOTree dbg top_closure g_children renderArrWordsLines id
@@ -888,7 +893,7 @@ data ArrWordsLine k = CountLine k Int Int | FieldLine ClosureDetails
 
 
 renderArrWordsLines :: Show a => ArrWordsLine a -> [Widget n]
-renderArrWordsLines (CountLine k l n) = [strLabel (show n), txt " ", renderBytes l, txt " ", strWrap (take 100 $ show k)]
+renderArrWordsLines (CountLine k l n) = [strLabel (show n), vSpace, renderBytes l, vSpace, strWrap (take 100 $ show k)]
 renderArrWordsLines (FieldLine cd) = renderInlineClosureDesc cd
 
 -- | Render a histogram with n lines which displays the number of elements in each bucket,
@@ -914,6 +919,11 @@ histogram boxes m =
       where
         (now, later) = span ((<= k + step) . snd) xs
 
+-- | Vertical space used to separate elements on the same line.
+--
+-- This is standardised for a consistent UI.
+vSpace :: Widget n
+vSpace = txt "   "
 
 arrWordsAction :: Debuggee -> EventM n OperationalState ()
 arrWordsAction dbg = do
@@ -937,11 +947,12 @@ arrWordsAction dbg = do
           mapM (\(lbl, child) -> FieldLine <$> getClosureDetails d (pack lbl) child) children'
         g_children d (FieldLine c) = map FieldLine <$> getChildren d c
 
-        renderHeaderPane (CountLine b l n) = (vBox $
-          [ txt "Count: " <+> str (show n)
-          , txt "Size: " <+> renderBytes l
-          , txt "Total Size: " <+> renderBytes (n * l)
-          , strWrap (take 100 $ show b)])
+        renderHeaderPane (CountLine b l n) = vBox
+          [ txtLabel "Count     " <+> vSpace <+> str (show n)
+          , txtLabel "Size      " <+> vSpace <+> renderBytes l
+          , txtLabel "Total Size" <+> vSpace <+> renderBytes (n * l)
+          , strWrap (take 100 $ show b)
+          ]
         renderHeaderPane (FieldLine c) = renderClosureDetails c
 
         renderWithHistogram c = joinBorders (renderHeaderPane c <+>
@@ -1019,7 +1030,7 @@ renderProfileLine (ProfileLine bs c) =
   where
     showLine :: CensusStats -> String
     showLine (CS (Count n) (Size s) (Data.Semigroup.Max (Size mn)) _) =
-      (concat :: [String] -> String)  [show s,":", show n, ":", show mn,":", show @Double (fromIntegral s / fromIntegral n)]
+      (concat :: [String] -> String)  [show s,":", show n, ":", show mn,":", Numeric.showFFloat @Double (Just 1) (fromIntegral s / fromIntegral n) ""]
 
 -- | What happens when we press enter in footer input mode
 dispatchFooterInput :: Debuggee
@@ -1054,12 +1065,13 @@ dispatchFooterInput dbg (FProfile lvl) form = do
           mapM (\(lbl, child) -> ClosureLine <$> getClosureDetails d (pack lbl) child) children'
 
         renderHeaderPane (ClosureLine cs) = renderClosureDetails cs
-        renderHeaderPane (ProfileLine t (CS (Count n) (Size s) (Data.Semigroup.Max (Size mn)) _)) = vBox $ [txt t
-                                             , txt "Count: " <+> str (show n)
-                                             , txt "Size: " <+> renderBytes s
-                                             , txt "Max: " <+> renderBytes mn
-                                             , txt "Average: " <+> renderBytes @Double (fromIntegral s / fromIntegral n)
-                                             ]
+        renderHeaderPane (ProfileLine t (CS (Count n) (Size s) (Data.Semigroup.Max (Size mn)) _)) = vBox
+          [ txtLabel "Label     " <+> txt t
+          , txtLabel "Count     " <+> str (show n)
+          , txtLabel "Size      " <+> renderBytes s
+          , txtLabel "Max       " <+> renderBytes mn
+          , txtLabel "Average   " <+> renderBytes @Double (fromIntegral s / fromIntegral n)
+          ]
 
         renderWithStats l = renderHeaderPane l <+>
           (padRight (Pad 1) $ (padLeft Brick.Max $ renderHeaderPane (ProfileLine "Total" total_stats)))
