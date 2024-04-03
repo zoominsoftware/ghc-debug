@@ -266,8 +266,9 @@ traceParFromM k cps = do
       go  = sendToChan (TraceState ts_map)
   as <- sequence (map ($ go) start )
   mapM_ go cps
-  unsafeLiftIO $ waitFinish work_actives
-  unsafeLiftIO $ mapM_ cancel as
+  wait_finish <- unsafeLiftIO $ async (waitFinish work_actives)
+  unsafeLiftIO $ waitAny $ (() <$ wait_finish) : (map ((<$) ()) as)
+  unsafeLiftIO $ mconcat <$> mapM cancel as
   unsafeLiftIO $ mconcat <$> mapM wait as
 
 waitFinish :: [STM Bool] -> IO ()
