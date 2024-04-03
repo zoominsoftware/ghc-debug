@@ -343,7 +343,7 @@ analyseFragmentation interval e = loop
         mb_census <- censusPinnedBlocks bs rs
         mbb_census <- censusByMBlock rs
         mbb_census2 <- censusByBlock rs
-        let is_small (CS _ (Size s) _) = fromIntegral s < 4096 * 0.9
+        let is_small (CS _ (Size s) _ _) = fromIntegral s < 4096 * 0.9
         let small_blocks = S.fromList (Map.keys (Map.filter is_small mbb_census2))
         let pred cp = applyBlockMask cp `S.member` small_blocks
         cen <- censusClosureTypeF (not . pred) rs
@@ -378,7 +378,7 @@ censusClosureTypeF p = closureCensusBy go
       d <- addConstrDesc s
       let siz :: Size
           siz = dcSize d
-          v =  mkCS siz
+          v =  mkCS cp siz
       return $ Just (applyMBlockMask cp, v)
     go _ _ = return Nothing
 
@@ -1010,7 +1010,7 @@ p44ec before after = do
   after_census  <- runTrace after $ do
                       precacheBlocks
                       gcRoots >>= count
-  let diff_census = (\cs1 cs2 -> Just (CS (cscount cs1 - cscount cs2) (cssize cs1 - cssize cs2) (Max 0)))
+  let diff_census = (\cs1 cs2 -> Just (CS (cscount cs1 - cscount cs2) (cssize cs1 - cssize cs2) (Max 0) mempty))
   print before_census
   print after_census
   print (diff_census after_census before_census)
@@ -1022,7 +1022,7 @@ p44e before after = do
   after_census  <- runTrace after $ do
                       precacheBlocks
                       gcRoots >>= censusClosureType
-  let diff_census = Map.differenceWith (\cs1 cs2 -> Just (CS (cscount cs1 - cscount cs2) (cssize cs1 - cssize cs2) (Max 0))) after_census before_census
+  let diff_census = Map.differenceWith (\cs1 cs2 -> Just (CS (cscount cs1 - cscount cs2) (cssize cs1 - cssize cs2) (Max 0) mempty)) after_census before_census
   printCensusByClosureType diff_census
 
 p44f before after = do
@@ -1032,7 +1032,7 @@ p44f before after = do
   after_census  <- runTrace after $ do
                       precacheBlocks
                       gcRoots >>= census2LevelClosureType
-  let diff_census = Map.differenceWith (\cs1 cs2 -> Just (CS (cscount cs1 - cscount cs2) (cssize cs1 - cssize cs2) (Max 0))) after_census before_census
+  let diff_census = Map.differenceWith (\cs1 cs2 -> Just (CS (cscount cs1 - cscount cs2) (cssize cs1 - cssize cs2) (Max 0) mempty)) after_census before_census
   printCensusByClosureType diff_census
 
 p44g after = do
