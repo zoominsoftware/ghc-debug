@@ -47,7 +47,7 @@ import qualified GHC.Debug.Types.Version as GD
 data Event
   = PollTick  -- Used to perform arbitrary polling based tasks e.g. looking for new debuggees
   | ProgressMessage Text
-  | ProgressFinished
+  | ProgressFinished Text NominalDiffTime
   | AsyncFinished (EventM Name OperationalState ())
 
 
@@ -248,6 +248,7 @@ currentRoots (SearchedRoots cp) = cp
 
 data OperationalState = OperationalState
     { _running_task :: Maybe ThreadId
+    , _last_run_time :: Maybe (Text, NominalDiffTime)
     , _treeMode :: TreeMode
     , _keybindingsMode :: OverlayMode
     , _footerMode :: FooterMode
@@ -327,7 +328,7 @@ osSize :: OperationalState -> Int
 osSize os = fromMaybe (Prelude.length (getIOTreeRoots $ _treeSavedAndGCRoots os)) $ treeLength (_treeMode os)
 
 pauseModeTree :: (forall a . (a -> Widget Name) -> IOTree a Name -> r) -> OperationalState -> r
-pauseModeTree k (OperationalState _ mode _kb _footer _from roots _ _ _ _) = case mode of
+pauseModeTree k (OperationalState _ _ mode _kb _footer _from roots _ _ _ _) = case mode of
   SavedAndGCRoots render -> k render roots
   Retainer render r -> k render r
   Searched render r -> k render r

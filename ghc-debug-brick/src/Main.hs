@@ -55,8 +55,9 @@ import qualified GHC.Debug.Types.Closures as Debug
 import IOTree
 import Lib as GD
 import Model
-import Data.ByteString.Lazy (ByteString)
 import Data.ByteUnits
+import Data.Time.Format
+import Data.Time.Clock
 
 
 drawSetup :: Text -> Text -> GenericList Name Seq.Seq SocketInfo -> Widget Name
@@ -100,9 +101,14 @@ myAppDraw (AppState majorState' _) =
         , withAttr menuAttr $ vLimit 1 $ hBox [txt "(p): Pause | (ESC): Exit", fill ' ']
         ]]
 
-      (PausedMode os@(OperationalState _ treeMode' kbmode fmode _ _ _ _ rfilters debuggeeVersion)) -> let
+      (PausedMode os@(OperationalState _ last_task treeMode' kbmode fmode _ _ _ _ rfilters debuggeeVersion)) -> let
+           last_task_string =
+            case last_task of
+              Nothing -> ""
+              Just (d,t) -> " - " <> d <> " (" <> T.pack (formatTime defaultTimeLocale "%2Es" t) <> "s)"
+
         in kbOverlay kbmode debuggeeVersion
-          $ [mainBorder ("ghc-debug - Paused - " <> socketName socket) $ vBox
+          $ [mainBorder ("ghc-debug - Paused - " <> socketName socket <> last_task_string) $ vBox
           [ -- Current closure details
               joinBorders $ (borderWithLabel (txt "Closure Details") $
               (vLimit 9 $
@@ -386,6 +392,7 @@ myAppHandleEvent brickEvent = do
             put (appState & majorState . mode .~
                         PausedMode
                           (OperationalState Nothing
+                                            Nothing
                                             savedAndGCRoots
                                             NoOverlay
                                             FooterInfo
@@ -663,9 +670,10 @@ handleMain dbg e = do
             PollTick -> return ()
             ProgressMessage t -> do
               put $ footerMessage t os
-            ProgressFinished ->
+            ProgressFinished desc runtime ->
               put $ os
                     & running_task .~ Nothing
+                    & last_run_time .~ Just (desc, runtime)
                     & footerMode .~ FooterInfo
             AsyncFinished action -> action
     _ | Nothing <- view running_task os ->
@@ -802,7 +810,7 @@ findCommand event = do
 handleMainWindowEvent :: Debuggee
                       -> Handler () OperationalState
 handleMainWindowEvent dbg brickEvent = do
-      os@(OperationalState _ treeMode' _kbMode _footerMode _curRoots rootsTree _ _ _ debuggeeVersion) <- get
+      os@(OperationalState _ _ treeMode' _kbMode _footerMode _curRoots rootsTree _ _ _ debuggeeVersion) <- get
       case brickEvent of
         VtyEvent (Vty.EvKey (KChar 'p') [Vty.MCtrl]) ->
           put $ os & keybindingsMode .~ commandPickerMode
@@ -1087,9 +1095,11 @@ asyncAction :: Text -> OperationalState -> IO a -> (a -> EventM Name Operational
 asyncAction desc os action final = do
   tid <- (liftIO $ forkIO $ do
     writeBChan eventChan (ProgressMessage desc)
+    start <- getCurrentTime
     res <- action
+    end <- getCurrentTime
     writeBChan eventChan (AsyncFinished (final res))
-    writeBChan eventChan ProgressFinished)
+    writeBChan eventChan (ProgressFinished desc (end `diffUTCTime` start)))
   put $ os & running_task .~ Just tid
            & resetFooter
   where
