@@ -4,6 +4,7 @@
 module GHC.Debug.Client.RequestCache(RequestCache
                                     , cacheReq
                                     , lookupReq
+                                    , lookupBlocks
                                     , emptyRequestCache
                                     , clearMovableRequests
                                     , putCache
@@ -32,6 +33,21 @@ lookupReq req (RequestCache rc) = coerceResult <$> HM.lookup (AnyReq req) rc
   where
     coerceResult :: AnyResp -> resp
     coerceResult (AnyResp a _) = unsafeCoerce a
+
+lookupBlocks :: RequestCache -> [RawBlock]
+lookupBlocks c@(RequestCache rc) =
+  let all_blocks = case lookupReq RequestAllBlocks c of
+                        Just bs -> bs
+                        Nothing -> []
+
+      get_block :: AnyReq -> AnyResp -> [RawBlock] -> [RawBlock]
+      get_block (AnyReq (RequestBlock {})) (AnyResp resp _) bs = unsafeCoerce resp : bs
+      get_block _ _ bs = bs
+
+      individual_blocks = HM.foldrWithKey get_block [] rc
+
+  in (all_blocks ++ individual_blocks)
+
 
 emptyRequestCache :: RequestCache
 emptyRequestCache = RequestCache HM.empty

@@ -123,9 +123,7 @@ instance DebugMonad DebugM where
 
 initBlockCacheFromReqCache :: RequestCache -> BlockCache
 initBlockCacheFromReqCache new_req_cache  =
-  case lookupReq RequestAllBlocks new_req_cache of
-        Just bs -> addBlocks bs emptyBlockCache
-        Nothing -> emptyBlockCache
+  addBlocks (lookupBlocks new_req_cache) emptyBlockCache
 
 
 
