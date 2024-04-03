@@ -856,9 +856,10 @@ inputFooterHandler _ _ _ k re = k re
 
 stringsAction :: Debuggee -> EventM n OperationalState ()
 stringsAction dbg = do
-  os <- get
+  outside_os <- get
   -- TODO: Does not honour search limit at all
-  asyncAction "Counting strings" os (stringsAnalysis Nothing dbg) $ \res -> do
+  asyncAction "Counting strings" outside_os (stringsAnalysis Nothing dbg) $ \res -> do
+    os <- get
     let cmp (k, v) = length k * (S.size v)
     let sorted_res = maybe id take (_resultSize os) $ Prelude.reverse [(k, S.toList v ) | (k, v) <- (List.sortBy (comparing (S.size . snd)) (M.toList res))]
 
@@ -916,8 +917,9 @@ histogram boxes m =
 
 arrWordsAction :: Debuggee -> EventM n OperationalState ()
 arrWordsAction dbg = do
-  os <- get
-  asyncAction "Counting ARR_WORDS" os (arrWordsAnalysis Nothing dbg) $ \res -> do
+  outside_os <- get
+  asyncAction "Counting ARR_WORDS" outside_os (arrWordsAnalysis Nothing dbg) $ \res -> do
+    os <- get
     let all_res = Prelude.reverse [(k, S.toList v ) | (k, v) <- (List.sortBy (comparing (\(k, v) -> fromIntegral (BS.length k) * S.size v)) (M.toList res))]
 
         display_res = maybe id take (_resultSize os) all_res
@@ -946,7 +948,7 @@ arrWordsAction dbg = do
           (borderWithLabel (txt "Histogram") $ hLimit 100 $ words_histogram))
 
         tree = mkIOTree dbg top_closure g_children renderArrWordsLines id
-    put (os & resetFooter
+    put (outside_os & resetFooter
             & treeMode .~ Searched renderWithHistogram tree
         )
 
@@ -954,9 +956,10 @@ data ThunkLine = ThunkLine (Maybe SourceInformation) Count
 
 thunkAnalysisAction :: Debuggee -> EventM n OperationalState ()
 thunkAnalysisAction dbg = do
-  os <- get
+  outside_os <- get
   -- TODO: Does not honour search limit at all
-  asyncAction "Counting thunks" os (thunkAnalysis dbg) $ \res -> do
+  asyncAction "Counting thunks" outside_os (thunkAnalysis dbg) $ \res -> do
+    os <- get
     let top_closure = Prelude.reverse [ ThunkLine k v | (k, v) <- (List.sortBy (comparing (getCount . snd)) (M.toList res))]
 
         g_children _ (ThunkLine {}) = pure []
@@ -979,10 +982,10 @@ thunkAnalysisAction dbg = do
 
 searchWithCurrentFilters :: Debuggee -> EventM n OperationalState ()
 searchWithCurrentFilters dbg = do
-  os <- get
-  let mClosFilter = uiFiltersToFilter (_filters os)
-  asyncAction "Searching for closures" os (liftIO $ retainersOf (_resultSize os) mClosFilter Nothing dbg) $ \cps -> do
-
+  outside_os <- get
+  let mClosFilter = uiFiltersToFilter (_filters outside_os)
+  asyncAction "Searching for closures" outside_os (liftIO $ retainersOf (_resultSize outside_os) mClosFilter Nothing dbg) $ \cps -> do
+    os <- get
     let cps' = map (zipWith (\n cp -> (T.pack (show n),cp)) [0 :: Int ..]) cps
     res <- liftIO $ mapM (mapM (completeClosureDetails dbg)) cps'
     let tree = mkRetainerTree dbg res
@@ -1033,9 +1036,10 @@ dispatchFooterInput dbg (FFilterClosureSize invert) form = filterOrRun dbg form 
 dispatchFooterInput dbg (FFilterClosureType invert) form = filterOrRun dbg form False readMaybe (pure . UIClosureTypeFilter invert)
 dispatchFooterInput dbg (FFilterCcId runf invert) form = filterOrRun dbg form runf readMaybe (pure . UICcId invert)
 dispatchFooterInput dbg (FProfile lvl) form = do
-   os <- get
+   outside_os <- get
 
-   asyncAction "Writing profile" os (profile dbg lvl (T.unpack (formState form))) $ \res -> do
+   asyncAction "Writing profile" outside_os (profile dbg lvl (T.unpack (formState form))) $ \res -> do
+    os <- get
     let top_closure = Prelude.reverse [ProfileLine k v  | (k, v) <- (List.sortBy (comparing (cssize . snd)) (M.toList res))]
 
         total_stats = foldMap snd (M.toList res)
@@ -1078,12 +1082,14 @@ dispatchFooterInput _ FDumpArrWords form = do
       SavedAndGCRoots _ -> act (ioTreeSelection (view treeSavedAndGCRoots os))
       Searched {} -> put (os & footerMessage "Dump for search mode not implemented yet")
 dispatchFooterInput _ FSetResultSize form = do
-   os <- get
-   asyncAction "setting result size" os (pure ()) $ \() -> case readMaybe $ T.unpack (formState form) of
-     Just n
-       | n <= 0 -> put (os & resultSize .~ Nothing)
-       | otherwise -> put (os & resultSize .~ (Just n))
-     Nothing -> pure ()
+   outside_os <- get
+   asyncAction "setting result size" outside_os (pure ()) $ \() -> do
+     os <- get
+     case readMaybe $ T.unpack (formState form) of
+       Just n
+         | n <= 0 -> put (os & resultSize .~ Nothing)
+         | otherwise -> put (os & resultSize .~ (Just n))
+       Nothing -> pure ()
 dispatchFooterInput dbg FSnapshot form = do
    os <- get
    asyncAction_ "Taking snapshot" os $ snapshot dbg (T.unpack (formState form))
