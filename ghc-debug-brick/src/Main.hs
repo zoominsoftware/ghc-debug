@@ -493,7 +493,7 @@ era_colors :: [Vty.Color]
 era_colors = [Vty.Color240 n | n <- [17..230]]
 
 grey :: Vty.Color
-grey = Vty.rgbColor 158 158 158
+grey = Vty.rgbColor (158 :: Int) 158 158
 
 -- | Draw the tree structure around the row item. Inspired by the
 -- 'border' functions in brick.
