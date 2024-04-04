@@ -10,7 +10,7 @@
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE BangPatterns #-}
-{-# OPTIONS_GHC -ddump-simpl -ddump-to-file -dsuppress-all #-}
+
 {- | Functions for performing whole heap census in the style of the normal
 - heap profiling -}
 module GHC.Debug.Profile( censusClosureType
