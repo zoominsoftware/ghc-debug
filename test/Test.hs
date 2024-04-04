@@ -984,7 +984,7 @@ p44d e = do
               ConstrDesc a b c <- dereferenceConDesc itbp
               return $ a ++ ":" ++ b ++ ":" ++ c
             _ -> return $ show (tipe itbl)
-    es' <- mapM (\(Edge e1 e2, cs) -> (,cs) . T.pack . show <$> ((,) <$> getKey e1 <*> getKey e2)) es
+    es' <- mapM (\(Edge e1 e2, cs) -> (,cs) . (,NoArgs) . ProfileClosureDesc . T.pack . show <$> ((,) <$> getKey e1 <*> getKey e2)) es
 
 
     return (c, indiv_c,  r, stack, names, a, Map.fromList es')
