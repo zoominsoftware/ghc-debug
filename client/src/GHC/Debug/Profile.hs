@@ -10,6 +10,7 @@
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE BangPatterns #-}
+{-# OPTIONS_GHC -ddump-simpl -ddump-to-file -dsuppress-all #-}
 {- | Functions for performing whole heap census in the style of the normal
 - heap profiling -}
 module GHC.Debug.Profile( censusClosureType
@@ -18,9 +19,22 @@ module GHC.Debug.Profile( censusClosureType
                         , CensusByClosureType
                         , writeCensusByClosureType
                         , CensusStats(..)
+                        , ProfileKey(..)
+                        , ProfileKeyArgs(..)
+                        , prettyProfileKey
+                        , prettyShortProfileKey
+                        , prettyProfileKeyArgs
+                        , prettyProfileKeyArgs'
+                        , prettyShortProfileKeyArgs
                         , mkCS
                         , Count(..)
-                        , closureToKey ) where
+                        , closureToKey
+                        , ConstrDescText
+                        , packConstrDesc
+                        , pkgsText
+                        , modlText
+                        , nameText
+                        ) where
 
 import GHC.Debug.Client.Monad
 import GHC.Debug.Client
@@ -32,12 +46,15 @@ import qualified Data.Map.Strict as Map
 import Control.Monad.State.Strict
 import Data.List (sortBy)
 import Data.Ord
-import Data.Text (pack, Text, unpack)
+import Data.Text (pack, Text)
 import Data.Semigroup
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import qualified Data.Map.Monoidal.Strict as MMap
 import Data.Bitraversable
 import Control.Monad
+import qualified Data.Set as Set
+import qualified Data.Vector as V
 
 --import Control.Concurrent
 --import Eventlog.Types
@@ -46,23 +63,20 @@ import Control.Monad
 --import Eventlog.HtmlTemplate
 --import Eventlog.Args (defaultArgs, Option(..))
 
-
-type CensusByClosureType = Map.Map Text CensusStats
+type CensusByClosureType = Map.Map (ProfileKey, ProfileKeyArgs) CensusStats
 
 -- | Perform a heap census in the same style as the -hT profile.
 censusClosureType :: [ClosurePtr] -> DebugM CensusByClosureType
 censusClosureType = closureCensusBy go
   where
     go :: ClosurePtr -> SizedClosure
-       -> DebugM (Maybe (Text, CensusStats ))
+       -> DebugM (Maybe ((ProfileKey, ProfileKeyArgs), CensusStats))
     go cp s = do
       d <- hextraverse pure pure pure dereferenceConDesc pure pure s
       let siz :: Size
           siz = dcSize d
           v =  mkCS cp siz
-      return $ Just (closureToKey (noSize d), v)
-
-
+      return $ Just ((closureToProfileKey (noSize d), NoArgs), v)
 
 closureToKey :: DebugClosure ccs srt a ConstrDesc c d -> Text
 closureToKey d =
@@ -71,6 +85,72 @@ closureToKey d =
        -> pack a <> ":" <> pack b <> ":" <> pack c
      _ -> pack (show (tipe (decodedTable (info d))))
 
+-- | 'ConstrDescText' wraps a 'ConstrDesc' but is backed by a 'Text'.
+--
+-- More efficient to keep around than 'ConstrDesc'.
+newtype ConstrDescText = ConstrDescText
+  { descText :: Text
+    -- ^ Contains the name, module name and package name. Values are separated by ';'.
+  } deriving (Show, Ord, Eq)
+
+pkgsText :: ConstrDescText -> Text
+pkgsText desc = case T.splitOn ";" (descText desc) of
+  _:_:pkgs:_ -> pkgs
+  _ -> error $ "pkgsText: invariant violation: " <> T.unpack (descText desc)
+
+
+modlText :: ConstrDescText -> Text
+modlText desc = case T.splitOn ";" (descText desc) of
+  _:modl:_:_ -> modl
+  _ -> error $ "modlText: invariant violation: " <> T.unpack (descText desc)
+
+nameText  :: ConstrDescText -> Text
+nameText desc = case T.splitOn ";" (descText desc) of
+  name:_:_:_ -> name
+  _ -> error $ "nameText: invariant violation: " <> T.unpack (descText desc)
+
+packConstrDesc :: ConstrDesc -> ConstrDescText
+packConstrDesc constrDesc = ConstrDescText
+  { descText = T.intercalate ";" [T.pack (name constrDesc), T.pack (modl constrDesc), T.pack (pkg constrDesc)]
+  }
+
+data ProfileKey
+  = ProfileConstrDesc !ConstrDescText
+  | ProfileClosureDesc !Text
+  deriving (Show, Ord, Eq)
+
+-- | Show the full 'ProfileKey', including package and module locations if available.
+prettyProfileKey :: ProfileKey -> Text
+prettyProfileKey (ProfileClosureDesc k) = k
+prettyProfileKey (ProfileConstrDesc desc) = pkgsText desc <> ":" <> modlText desc <> ":" <> nameText desc
+
+-- | Show the 'ProfileKey' in a shortened form if possible.
+-- For example, it omits package and module locations for 'ProfileConstrDesc'.
+prettyShortProfileKey :: ProfileKey -> Text
+prettyShortProfileKey (ProfileClosureDesc k) = k
+prettyShortProfileKey (ProfileConstrDesc desc) = nameText desc
+
+closureToProfileKey :: DebugClosure ccs srt a ConstrDesc c d -> ProfileKey
+closureToProfileKey d =
+  case d of
+     ConstrClosure { constrDesc = constrDesc } -> ProfileConstrDesc $ packConstrDesc constrDesc
+     _ -> ProfileClosureDesc $ pack (show (tipe (decodedTable (info d))))
+data ProfileKeyArgs
+  = ArrKeyArgs !ProfileKey !Int
+  | AllKeyArgs !(V.Vector ProfileKey)
+  | NoArgs
+  deriving (Show, Ord, Eq)
+
+prettyProfileKeyArgs :: ProfileKeyArgs -> Text
+prettyProfileKeyArgs = prettyProfileKeyArgs' prettyProfileKey
+
+prettyShortProfileKeyArgs :: ProfileKeyArgs -> Text
+prettyShortProfileKeyArgs = prettyProfileKeyArgs' prettyShortProfileKey
+
+prettyProfileKeyArgs' :: (ProfileKey -> Text) -> ProfileKeyArgs -> Text
+prettyProfileKeyArgs' prettyKey (ArrKeyArgs typ num) = "[" <> prettyKey typ <> ": " <> T.pack (show num) <> "]"
+prettyProfileKeyArgs' prettyKey (AllKeyArgs args) = "[" <> T.intercalate "," (map prettyKey $ V.toList args) <> "]"
+prettyProfileKeyArgs' _  NoArgs = ""
 
 -- | General function for performing a heap census in constant memory
 closureCensusBy :: forall k v . (Semigroup v, Ord k)
@@ -122,12 +202,33 @@ census2LevelClosureType cps = snd <$> runStateT (traceFromM funcs cps) Map.empty
       modify' (go cp s' pts')
       k
 
+    closureArgsToKeyArgs (ProfileClosureDesc k) kargs =
+      if k `Set.member` mutArrConstants && Set.size (Set.fromList kargs) == 1
+        then ArrKeyArgs (head kargs) (length kargs)
+        else AllKeyArgs $! V.fromList kargs
+    closureArgsToKeyArgs (ProfileConstrDesc _) kargs =
+      AllKeyArgs $ V.fromList kargs
+
     go cp d args =
-      let k = closureToKey (noSize d)
-          kargs = map (closureToKey . noSize) args
-          final_k :: Text
-          !final_k = k <> "[" <> T.intercalate "," kargs <> "]"
-      in Map.insertWith (<>) final_k (mkCS cp (dcSize d))
+      let !k = closureToProfileKey (noSize d)
+          kargs = map (closureToProfileKey . noSize) args
+          !keyArgs = closureArgsToKeyArgs k kargs
+      in Map.insertWith (<>) (k, keyArgs) (mkCS cp (dcSize d))
+
+    -- We handle these closure types differently as they can list each entry as an arg.
+    -- That leads to huge results, so we try to compress these closure types if and only if
+    -- they describe a constructor homogenous array. Thus, it works well for product types
+    -- but not for sum types.
+    mutArrConstants = Set.fromList $ map (T.pack . show)
+      [ MUT_ARR_PTRS_CLEAN
+      , MUT_ARR_PTRS_DIRTY
+      , MUT_ARR_PTRS_FROZEN_DIRTY
+      , MUT_ARR_PTRS_FROZEN_CLEAN
+      , SMALL_MUT_ARR_PTRS_CLEAN
+      , SMALL_MUT_ARR_PTRS_DIRTY
+      , SMALL_MUT_ARR_PTRS_FROZEN_DIRTY
+      , SMALL_MUT_ARR_PTRS_FROZEN_CLEAN
+      ]
 
 {-
 -- | Parallel heap census
@@ -153,10 +254,18 @@ parCensus bs cs =  do
 writeCensusByClosureType :: FilePath -> CensusByClosureType -> IO ()
 writeCensusByClosureType outpath c = do
   let res = sortBy (flip (comparing (cssize . snd))) (Map.toList c)
-      showLine (k, CS (Count n) (Size s) (Max (Size mn)) _) =
-        concat [unpack k, ":", show s,":", show n, ":", show mn,":", show @Double (fromIntegral s / fromIntegral n)]
-  writeFile outpath (unlines $ "key, total, count, max, avg" : map showLine res)
-
+  T.writeFile outpath (T.unlines $ "key; total; count; max; avg" : map showLine res)
+  where
+    separator = "; "
+    showKey k args = prettyProfileKey k <> prettyProfileKeyArgs args
+    showLine ((k, kargs), CS (Count n) (Size s) (Max (Size mn)) _) =
+      T.intercalate separator
+        [ showKey k kargs
+        , T.pack (show s)
+        , T.pack (show n)
+        , T.pack (show mn)
+        , T.pack (show @Double (fromIntegral s / fromIntegral n))
+        ]
 
 {-
 -- | Peform a profile at the given interval (in seconds), the result will

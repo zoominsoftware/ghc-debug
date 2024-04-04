@@ -249,7 +249,7 @@ savedClosures e = run e $ do
             closurePtrs
             closures
 
-profile :: Debuggee -> ProfileLevel -> FilePath -> IO (Map.Map Text GD.CensusStats)
+profile :: Debuggee -> ProfileLevel -> FilePath -> IO GD.CensusByClosureType
 profile dbg lvl fp = do
   c <- run dbg $ do
     roots <- GD.gcRoots

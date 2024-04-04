@@ -47,6 +47,7 @@ import qualified Data.Set as S
 import qualified Data.Foldable as F
 import Text.Read (readMaybe)
 
+import qualified GHC.Debug.Profile as GDP
 import GHC.Debug.Profile.Types
 import Data.Semigroup
 
@@ -230,8 +231,11 @@ renderSourceInformation (SourceInformation name cty ty label' modu loc) =
     ]
 
 labelled :: Text -> Widget Name -> Widget Name
-labelled lbl w =
-  hLimit 20 (txtLabel lbl <+> vLimit 1 (fill ' ')) <+> w <+> vLimit 1 (fill ' ')
+labelled = labelled' 20
+
+labelled' :: Int -> Text -> Widget Name -> Widget Name
+labelled' leftSize lbl w =
+  hLimit leftSize  (txtLabel lbl <+> vLimit 1 (fill ' ')) <+> w <+> vLimit 1 (fill ' ')
 
 renderUIFilter :: UIFilter -> Widget Name
 renderUIFilter (UIAddressFilter invert x)     = labelled (bool "" "!" invert <> "Closure address") (str (show x))
@@ -252,7 +256,7 @@ renderClosureDetails (cd@(ClosureDetails {})) =
     renderInfoInfo (_info cd)
     ++
     [ hBox
-      [ txtLabel "Exclusive Size" <+> vSpace <+> txt (maybe "" (pack . show @Int . GD.getSize) (Just $ _excSize cd) <> " bytes")
+      [ txtLabel "Exclusive Size" <+> vSpace <+> renderBytes (GD.getSize $ _excSize cd)
       ]
     ]
 renderClosureDetails ((LabelNode n)) = txt n
@@ -875,9 +879,9 @@ stringsAction dbg = do
         g_children d (FieldLine c) = map FieldLine <$> getChildren d c
 
         renderHeaderPane (CountLine k l n) = vBox
-          [ txtLabel "Count     " <+> vSpace <+> str (show n)
-          , txtLabel "Size      " <+> vSpace <+> renderBytes l
-          , txtLabel "Total Size" <+> vSpace <+> renderBytes (n * l)
+          [ labelled "Count     " $ vLimit 1 $ str (show n)
+          , labelled "Size      " $ vLimit 1 $ renderBytes l
+          , labelled "Total Size" $ vLimit 1 $ renderBytes (n * l)
           , strWrap (take 100 $ show k)
           ]
         renderHeaderPane (FieldLine c) = renderClosureDetails c
@@ -948,15 +952,15 @@ arrWordsAction dbg = do
         g_children d (FieldLine c) = map FieldLine <$> getChildren d c
 
         renderHeaderPane (CountLine b l n) = vBox
-          [ txtLabel "Count     " <+> vSpace <+> str (show n)
-          , txtLabel "Size      " <+> vSpace <+> renderBytes l
-          , txtLabel "Total Size" <+> vSpace <+> renderBytes (n * l)
+          [ labelled "Count"      $ vLimit 1 $ str (show n)
+          , labelled "Size"       $ vLimit 1 $ renderBytes l
+          , labelled "Total Size" $ vLimit 1 $ renderBytes (n * l)
           , strWrap (take 100 $ show b)
           ]
         renderHeaderPane (FieldLine c) = renderClosureDetails c
 
         renderWithHistogram c = joinBorders (renderHeaderPane c <+>
-          (borderWithLabel (txt "Histogram") $ hLimit 100 $ words_histogram))
+          (padRight (Pad 1) $ (padLeft Brick.Max $ borderWithLabel (txt "Histogram") $ hLimit 100 $ words_histogram)))
 
         tree = mkIOTree dbg top_closure g_children renderArrWordsLines id
     put (outside_os & resetFooter
@@ -1021,16 +1025,29 @@ filterOrRunM dbg form doRun parse createFilterM = do
         modify $ (resetFooter . addFilters newFilter)
     Nothing -> modify resetFooter
 
-data ProfileLine  = ProfileLine Text CensusStats | ClosureLine ClosureDetails
+data ProfileLine  = ProfileLine GDP.ProfileKey GDP.ProfileKeyArgs CensusStats | ClosureLine ClosureDetails
 
 renderProfileLine :: ProfileLine -> [Widget Name]
 renderProfileLine (ClosureLine c) = renderInlineClosureDesc c
-renderProfileLine (ProfileLine bs c) =
- [txtLabel bs, txt " ",  str (showLine c)]
+renderProfileLine (ProfileLine k kargs c) =
+ [txt (GDP.prettyShortProfileKey k <> GDP.prettyShortProfileKeyArgs kargs), txt " ",  showLine c]
   where
-    showLine :: CensusStats -> String
+    showLine :: CensusStats -> Widget Name
     showLine (CS (Count n) (Size s) (Data.Semigroup.Max (Size mn)) _) =
-      (concat :: [String] -> String)  [show s,":", show n, ":", show mn,":", Numeric.showFFloat @Double (Just 1) (fromIntegral s / fromIntegral n) ""]
+      hBox
+        [ withFontColor totalSizeColor $ str (show s),  vSpace
+        , withFontColor countColor $ str (show n),  vSpace
+        , withFontColor sizeColor $ str (show mn), vSpace
+        , withFontColor avgSizeColor $ str (Numeric.showFFloat @Double (Just 1) (fromIntegral s / fromIntegral n) "")
+        ]
+
+    withFontColor color = modifyDefAttr (flip Vty.withForeColor color)
+
+    totalSizeColor = Vty.RGBColor 0x26 0x83 0xDE
+    countColor = Vty.RGBColor 0xDE 0x66 0x26
+    sizeColor = Vty.RGBColor 0x26 0xDE 0xD7
+    avgSizeColor = Vty.RGBColor 0xAB 0x4D 0xE0
+
 
 -- | What happens when we press enter in footer input mode
 dispatchFooterInput :: Debuggee
@@ -1051,12 +1068,12 @@ dispatchFooterInput dbg (FProfile lvl) form = do
 
    asyncAction "Writing profile" outside_os (profile dbg lvl (T.unpack (formState form))) $ \res -> do
     os <- get
-    let top_closure = Prelude.reverse [ProfileLine k v  | (k, v) <- (List.sortBy (comparing (cssize . snd)) (M.toList res))]
+    let top_closure = Prelude.reverse [ProfileLine k kargs v  | ((k, kargs), v) <- (List.sortBy (comparing (cssize . snd)) (M.toList res))]
 
         total_stats = foldMap snd (M.toList res)
 
         g_children d (ClosureLine c) = map ClosureLine <$> getChildren d c
-        g_children d (ProfileLine _ stats) = do
+        g_children d (ProfileLine _ _ stats) = do
           let cs = getSamples (sample stats)
           cs' <- run dbg $ forM cs $ \c -> do
             c' <- GD.dereferenceClosure c
@@ -1065,19 +1082,30 @@ dispatchFooterInput dbg (FProfile lvl) form = do
           mapM (\(lbl, child) -> ClosureLine <$> getClosureDetails d (pack lbl) child) children'
 
         renderHeaderPane (ClosureLine cs) = renderClosureDetails cs
-        renderHeaderPane (ProfileLine t (CS (Count n) (Size s) (Data.Semigroup.Max (Size mn)) _)) = vBox
-          [ txtLabel "Label     " <+> txt t
-          , txtLabel "Count     " <+> str (show n)
-          , txtLabel "Size      " <+> renderBytes s
-          , txtLabel "Max       " <+> renderBytes mn
-          , txtLabel "Average   " <+> renderBytes @Double (fromIntegral s / fromIntegral n)
+        renderHeaderPane (ProfileLine k args (CS (Count n) (Size s) (Data.Semigroup.Max (Size mn)) _)) = vBox $
+          [ txtLabel "Label      " <+> vSpace <+> txt (GDP.prettyShortProfileKey k <> GDP.prettyShortProfileKeyArgs args)
+          ]
+          <>
+          (case k of
+            GDP.ProfileConstrDesc desc ->
+              [ txtLabel "Package    " <+> vSpace <+> (txt (GDP.pkgsText desc))
+              , txtLabel "Module     " <+> vSpace <+> (txt (GDP.modlText desc))
+              , txtLabel "Constructor" <+> vSpace <+> (txt (GDP.nameText desc))
+              ]
+            _ -> []
+              )
+          <>
+          [ txtLabel "Count      " <+> vSpace <+> str (show n)
+          , txtLabel "Size       " <+> vSpace <+> renderBytes s
+          , txtLabel "Max        " <+> vSpace <+> renderBytes mn
+          , txtLabel "Average    " <+> vSpace <+> renderBytes @Double (fromIntegral s / fromIntegral n)
           ]
 
-        renderWithStats l = renderHeaderPane l <+>
-          (padRight (Pad 1) $ (padLeft Brick.Max $ renderHeaderPane (ProfileLine "Total" total_stats)))
+        renderWithStats l = joinBorders $ renderHeaderPane l <+>
+          (padRight (Pad 1) $ (padLeft Brick.Max $ renderHeaderPane (ProfileLine (GDP.ProfileClosureDesc "Total") GDP.NoArgs total_stats)))
 
 
-
+        tree :: IOTree ProfileLine Name
         tree = mkIOTree dbg top_closure g_children renderProfileLine id
     put (os & resetFooter
             & treeMode .~ Searched renderWithStats tree
