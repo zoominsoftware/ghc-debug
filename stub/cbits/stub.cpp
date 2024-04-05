@@ -737,17 +737,28 @@ static int handle_command(Socket& sock, const char *buf, uint32_t cmd_len) {
         trace("SOURCE_INFO\n");
         StgInfoTable *info_table = (StgInfoTable *) p.get<uint64_t>();
         trace("INFO: %p\n", info_table);
-        InfoProvEnt * elt = lookupIPE(info_table);
+
+
         trace("ELT: %p\n", info_table);
+#if MIN_VERSION_GLASGOW_HASKELL(9,11,20240401,0)
+        InfoProvEnt elt;
+        int elt_res = lookupIPE(info_table, &elt);
+#else
+        InfoProvEnt * elt = lookupIPE(info_table);
+        int elt_res = (bool) elt;
+#endif
         uint32_t len_payload;
-        if (!elt){
+        if (!elt_res){
           trace("NOT FOUND\n");
           resp.write((uint32_t) 0);
         }
         else {
+#if MIN_VERSION_GLASGOW_HASKELL(9,11,20240401,0)
+          InfoProv ip = elt.prov;
+#else
           InfoProv ip = elt->prov;
+#endif
           trace("FOUND\n");
-
           size_t len = 6;
           write_size(resp, len);
 
