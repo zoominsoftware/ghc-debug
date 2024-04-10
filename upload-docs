@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+
+dir=dist-docs
+mkdir -p $dir
+
+# assumes cabal 2.4 or later
+cabal v2-haddock $@ --builddir="$dir" --haddock-for-hackage ghc-debug-client
+cabal v2-haddock $@ --builddir="$dir" --haddock-for-hackage ghc-debug-stub
+cabal v2-haddock $@ --builddir="$dir" --haddock-for-hackage ghc-debug-convention
+cabal v2-haddock $@ --builddir="$dir" --haddock-for-hackage ghc-debug-common
+
+cabal upload -d --publish $dir/ghc-debug-client-*-docs.tar.gz
+cabal upload -d --publish $dir/ghc-debug-stub-*-docs.tar.gz
+cabal upload -d --publish $dir/ghc-debug-convention-*-docs.tar.gz
+cabal upload -d --publish $dir/ghc-debug-common-*-docs.tar.gz

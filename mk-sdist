@@ -1,0 +1,7 @@
+cabal sdist ghc-debug-convention
+cabal sdist ghc-debug-brick
+cabal sdist ghc-debug-stub
+cabal sdist ghc-debug-common
+cabal sdist ghc-debug-client
+cabal upload dist-newstyle/sdist/*.tar.gz
+
