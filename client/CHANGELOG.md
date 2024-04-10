@@ -1,5 +1,11 @@
 # Revision history for ghc-debug-client
 
+## 0.6.0.0 -- 2024-04-10
+
+* Properly handle exceptions in parralel traversals
+* Fix snapshotting when extra blocks are requested by RequestBlock
+* Support for profiling RTS
+
 ## 0.5.0.0 -- 2023-06-06
 
 * Remove eventlog2html dependency and hence `profile` function. These can be

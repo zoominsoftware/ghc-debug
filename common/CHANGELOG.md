@@ -1,5 +1,11 @@
 # Revision history for ghc-debug-common
 
+## 0.6.0.0 -- 2024-04-10
+
+* Support for decoding profiled RTS
+* Remove dependency on ghc-heap, all closures are decoded natively without
+  any dependency on the compiler used to build ghc-debug.
+
 ## 0.5.0.0 -- 2023-06-06
 
 * Bump to keep in sync with other libraries

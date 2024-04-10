@@ -1,5 +1,21 @@
 # Revision history for ghc-debug-brick
 
+## 0.6.0.0 -- 2024-04-10
+
+* Allow setting result size
+* Add query for searching ArrWords over a given size
+* Add support for displaying profiling info
+* Add find retainer by address
+* Add ArrWords analysis
+* Add 2-level profile census
+* Display results of profiles in window
+* Add display for eras profiling
+* Add new filter-based search workflow
+* Fix performance of queries with large results
+* Add filter by cost centre ID
+* Compile with `-N` to enable parallelism
+* Many more small tweaks, this is an important release!
+
 ## 0.5.0.0 -- 2023-06-06
 
 * Add find closure by info table address

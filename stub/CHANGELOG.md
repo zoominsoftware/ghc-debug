@@ -1,5 +1,10 @@
 # Revision history for ghc-debug-stub
 
+## 0.6.0.0 -- 2024-04-10
+
+* Add requests for decoding cost centres and other profiling info
+* Update support for GHC as of 9.11.20240410
+
 ## 0.5.0.0 -- 2023-06-06
 
 * Add support for debugging over a TCP socket (`withGhcDebugTCP`)
