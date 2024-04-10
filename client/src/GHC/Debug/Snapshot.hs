@@ -14,15 +14,17 @@ import GHC.Debug.Client
 import Control.Monad.Identity
 import Control.Monad.Trans
 import GHC.Debug.CostCentres (findAllChildrenOfCC)
+import Control.Monad
+import GHC.Debug.Types.Version
 
 -- | Make a snapshot of the current heap and save it to the given file.
 snapshot :: FilePath -> DebugM ()
 snapshot fp = do
   precacheBlocks
-  version
+  ver <- version
   rs <- gcRoots
   _so <- savedObjects
-  findAllChildrenOfCC (const False)
+  when (isProfiledRTS ver) (() <$ findAllChildrenOfCC (const False))
   tracePar rs
   saveCache fp
 
