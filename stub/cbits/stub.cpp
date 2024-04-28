@@ -740,7 +740,7 @@ static int handle_command(Socket& sock, const char *buf, uint32_t cmd_len) {
 
 
         trace("ELT: %p\n", info_table);
-#if MIN_VERSION_GLASGOW_HASKELL(9,11,20240401,0)
+#if MIN_VERSION_GLASGOW_HASKELL(9,10,0,0)
         InfoProvEnt elt;
         int elt_res = lookupIPE(info_table, &elt);
 #else
@@ -753,7 +753,7 @@ static int handle_command(Socket& sock, const char *buf, uint32_t cmd_len) {
           resp.write((uint32_t) 0);
         }
         else {
-#if MIN_VERSION_GLASGOW_HASKELL(9,11,20240401,0)
+#if MIN_VERSION_GLASGOW_HASKELL(9,10,0,0)
           InfoProv ip = elt.prov;
 #else
           InfoProv ip = elt->prov;
