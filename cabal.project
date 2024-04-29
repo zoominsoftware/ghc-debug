@@ -1,4 +1,4 @@
-packages: common, stub, client, test, dyepack-test, ghc-debug-brick, convention
+packages: common, stub, client, test, ghc-debug-brick, convention
 
 -- If you see a Cmm lexical error, then comment out this line
 -- debug-info: 3

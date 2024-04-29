@@ -60,9 +60,6 @@ saveOnePath = testProgPath "save-one"
 debugTestPath :: IO FilePath
 debugTestPath = testProgPath "debug-test"
 
-dyePackTestPath :: IO FilePath
-dyePackTestPath = testProgPath "dyepack-test"
-
 testProgPath :: String -> IO FilePath
 testProgPath progName = do
   path <- readCreateProcess shellCmd []
@@ -113,7 +110,7 @@ printCensusByClosureType = writeCensusByClosureType "profile/profile_out.txt"
 {-
 main = do
   -- Get the path to the "debug-test" executable
---  prog <- debugTestPath -- Or @dyePackTestPath@
+--  prog <- debugTestPath
 --  print prog
   let prog = "/home/matt/ghc-debug/dist-newstyle/build/x86_64-linux/ghc-9.1.0.20201106/ghc-debug-stub-0.1.0.0/x/debug-test/build/debug-test/debug-test"
 
