@@ -295,7 +295,7 @@ void inform_callback(void *user, PauseToken * p){
 // Size fields are always uint32_t in network-byte-order.
 static void write_size(Response& resp, StgWord size) {
     uint32_t size_payload = htonl(size);
-    trace("SIZE %llu", size);
+    trace("SIZE %lu", size);
     resp.write((uint32_t) size_payload);
 }
 
