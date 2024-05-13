@@ -149,7 +149,7 @@ class Response {
             this->sock.write((char *) &status_payload, sizeof(uint16_t));
             // then the body, usually empty
             trace("responding with body of length %lu: ( ", len);
-            for (int i = 0; i < len; i++)
+            for (size_t i = 0; i < len; i++)
             {
                 trace("%02X", buf[i]);
             }
@@ -262,7 +262,7 @@ void resume_mutator() {
 
 
 void collect_threads(std::function<void(StgTSO*)> f) {
-    for (int g=0; g < RtsFlags.GcFlags.generations; g++) {
+    for (uint32_t g=0; g < RtsFlags.GcFlags.generations; g++) {
         StgTSO *tso = generations[g].threads;
         while (tso != END_TSO_QUEUE) {
             f(tso);
@@ -315,8 +315,6 @@ static void write_large_bitmap(Response& resp, StgLargeBitmap *large_bitmap, Stg
 }
 
 static void write_small_bitmap(Response& resp, StgWord bitmap, StgWord size) {
-    uint32_t i = 0;
-
     // Small bitmap
     write_size(resp, size);
     while (size > 0) {
@@ -643,7 +641,7 @@ static int handle_command(Socket& sock, const char *buf, uint32_t cmd_len) {
         break;
 
       case CMD_SAVED_OBJECTS:
-        int i;
+        StgWord i;
         for (i = 0; i < g_savedObjectState.n_objects; i++) {
           StgStablePtr v = g_savedObjectState.objects[i];
           resp.write((uint64_t)(UNTAG_CLOSURE((StgClosure *)deRefStablePtr(v))));
@@ -747,7 +745,7 @@ static int handle_command(Socket& sock, const char *buf, uint32_t cmd_len) {
         InfoProvEnt * elt = lookupIPE(info_table);
         int elt_res = (bool) elt;
 #endif
-        uint32_t len_payload;
+
         if (!elt_res){
           trace("NOT FOUND\n");
           resp.write((uint32_t) 0);
