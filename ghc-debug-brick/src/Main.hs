@@ -37,6 +37,7 @@ import qualified Graphics.Vty.CrossPlatform as Vty
 import Graphics.Vty.Input.Events (Key(..))
 import Lens.Micro.Platform
 import System.Directory
+import System.Environment (lookupEnv)
 import System.FilePath
 import Data.Bool
 import Data.Text (Text, pack)
@@ -305,145 +306,140 @@ updateListFrom :: MonadIO m =>
                         -> GenericList n Seq.Seq SocketInfo
                         -> m (GenericList n Seq.Seq SocketInfo)
 updateListFrom dirIO llist = liftIO $ do
-            dir :: FilePath <- dirIO
-            debuggeeSocketFiles :: [FilePath] <- listDirectory dir <|> return []
+  dir :: FilePath <- dirIO
+  envOverride :: Maybe FilePath <- lookupEnv "GHC_DEBUG_SOCKET"
+  debuggeeSocketFiles :: [FilePath] <- listDirectory dir <|> return [] <&> maybe id (:) envOverride
 
-            -- Sort the sockets by the time they have been created, newest
-            -- first.
-            debuggeeSockets <- List.sortBy (comparing Ord.Down)
-                                  <$> mapM (mkSocketInfo . (dir </>)) debuggeeSocketFiles
+  -- Sort the sockets by the time they have been created, newest first.
+  debuggeeSockets <- List.sortBy (comparing Ord.Down)
+                 <$> mapM (mkSocketInfo . (dir </>)) debuggeeSocketFiles
 
-            let currentSelectedPathMay :: Maybe SocketInfo
-                currentSelectedPathMay = fmap snd (listSelectedElement llist)
+  let currentSelectedPathMay :: Maybe SocketInfo
+      currentSelectedPathMay = fmap snd (listSelectedElement llist)
 
-                newSelection :: Maybe Int
-                newSelection = do
-                  currentSelectedPath <- currentSelectedPathMay
-                  List.findIndex ((currentSelectedPath ==)) debuggeeSockets
+      newSelection :: Maybe Int
+      newSelection = do
+        currentSelectedPath <- currentSelectedPathMay
+        List.findIndex ((currentSelectedPath ==)) debuggeeSockets
 
-            return $ listReplace
-                      (Seq.fromList debuggeeSockets)
-                      (newSelection <|> (if Prelude.null debuggeeSockets then Nothing else Just 0))
-                      llist
+  return $ listReplace
+            (Seq.fromList debuggeeSockets)
+            (newSelection <|> (if Prelude.null debuggeeSockets then Nothing else Just 0))
+            llist
 
 
 myAppHandleEvent :: BrickEvent Name Event -> EventM Name AppState ()
 myAppHandleEvent brickEvent = do
   appState@(AppState majorState' eventChan) <- get
-  case brickEvent of
-    _ -> case majorState' of
-      Setup st knownDebuggees' knownSnapshots' -> case brickEvent of
+  case majorState' of
+    Setup st knownDebuggees' knownSnapshots' -> case brickEvent of
 
-        VtyEvent (Vty.EvKey KEsc _) -> halt
-        VtyEvent event -> case event of
-          -- Connect to the selected debuggee
-          Vty.EvKey (KChar '\t') [] -> do
-            put $ appState & majorState . setupKind %~ toggleSetup
-          Vty.EvKey KEnter _ ->
-            case st of
-              Snapshot
-                | Just (_debuggeeIx, socket) <- listSelectedElement knownSnapshots'
-                -> do
-                  debuggee' <- liftIO $ snapshotConnect (writeBChan eventChan . ProgressMessage) (view socketLocation socket)
-                  put $ appState & majorState .~ Connected
-                        { _debuggeeSocket = socket
-                        , _debuggee = debuggee'
-                        , _mode     = RunningMode  -- TODO should we query the debuggee for this?
-                    }
-              Socket
-                | Just (_debuggeeIx, socket) <- listSelectedElement knownDebuggees'
-                -> do
-                  bracket
-                    (liftIO $ debuggeeConnect (writeBChan eventChan . ProgressMessage) (view socketLocation socket))
-                    (\debuggee' -> liftIO $ resume debuggee')
-                    (\debuggee' ->
-                      put $ appState & majorState .~ Connected
-                        { _debuggeeSocket = socket
-                        , _debuggee = debuggee'
-                        , _mode     = RunningMode  -- TODO should we query the debuggee for this?
-                        })
-              _ -> return ()
+      VtyEvent (Vty.EvKey KEsc _) -> halt
+      VtyEvent event -> case event of
+        -- Connect to the selected debuggee
+        Vty.EvKey (KChar '\t') [] -> do
+          put $ appState & majorState . setupKind %~ toggleSetup
+        Vty.EvKey KEnter _ ->
+          case st of
+            Snapshot
+              | Just (_debuggeeIx, socket) <- listSelectedElement knownSnapshots'
+              -> do
+                debuggee' <- liftIO $ snapshotConnect (writeBChan eventChan . ProgressMessage) (view socketLocation socket)
+                put $ appState & majorState .~ Connected
+                      { _debuggeeSocket = socket
+                      , _debuggee = debuggee'
+                      , _mode     = RunningMode  -- TODO should we query the debuggee for this?
+                  }
+            Socket
+              | Just (_debuggeeIx, socket) <- listSelectedElement knownDebuggees'
+              -> do
+                bracket
+                  (liftIO $ debuggeeConnect (writeBChan eventChan . ProgressMessage) (view socketLocation socket))
+                  (\debuggee' -> liftIO $ resume debuggee')
+                  (\debuggee' ->
+                    put $ appState & majorState .~ Connected
+                      { _debuggeeSocket = socket
+                      , _debuggee = debuggee'
+                      , _mode     = RunningMode  -- TODO should we query the debuggee for this?
+                      })
+            _ -> return ()
 
-          -- Navigate through the list.
-          _ -> do
-            case st of
-              Snapshot -> do
-                zoom (majorState . knownSnapshots) (handleListEventVi handleListEvent event)
-              Socket -> do
-                zoom (majorState . knownDebuggees) (handleListEventVi handleListEvent event)
+        -- Navigate through the list.
+        _ -> do
+          case st of
+            Snapshot -> do
+              zoom (majorState . knownSnapshots) (handleListEventVi handleListEvent event)
+            Socket -> do
+              zoom (majorState . knownDebuggees) (handleListEventVi handleListEvent event)
 
-        AppEvent event -> case event of
-          PollTick -> do
-            -- Poll for debuggees
-            knownDebuggees'' <- updateListFrom socketDirectory knownDebuggees'
-            knownSnapshots'' <- updateListFrom snapshotDirectory knownSnapshots'
-            put $ appState & majorState . knownDebuggees .~ knownDebuggees''
-                                & majorState . knownSnapshots .~ knownSnapshots''
-          _ -> return ()
+      AppEvent event -> case event of
+        PollTick -> do
+          -- Poll for debuggees
+          knownDebuggees'' <- updateListFrom socketDirectory knownDebuggees'
+          knownSnapshots'' <- updateListFrom snapshotDirectory knownSnapshots'
+          put $ appState & majorState . knownDebuggees .~ knownDebuggees''
+                         & majorState . knownSnapshots .~ knownSnapshots''
+        _ -> return ()
+      _ -> return ()
+
+    Connected _socket' debuggee' mode' -> case mode' of
+
+      RunningMode -> case brickEvent of
+        -- Exit
+        VtyEvent (Vty.EvKey KEsc _) ->
+          halt
+        -- Pause the debuggee
+        VtyEvent (Vty.EvKey (KChar 'p') []) -> do
+          liftIO $ pause debuggee'
+          ver <- liftIO $ GD.version debuggee'
+          (rootsTree, initRoots) <- liftIO $ mkSavedAndGCRootsIOTree
+          put (appState & majorState . mode .~
+                      PausedMode
+                        (OperationalState Nothing
+                                          Nothing
+                                          savedAndGCRoots
+                                          NoOverlay
+                                          FooterInfo
+                                          (DefaultRoots initRoots)
+                                          rootsTree
+                                          eventChan
+                                          (Just 100)
+                                          []
+                                          ver
+                        ))
         _ -> return ()
 
-      Connected _socket' debuggee' mode' -> case mode' of
+      PausedMode os ->
+        case brickEvent of
+            -- Resume the debuggee if '^r', exit if ESC
+            VtyEvent (Vty.EvKey (KChar 'r') [Vty.MCtrl]) -> do
+                liftIO $ resume debuggee'
+                put (appState & majorState . mode .~ RunningMode)
+            VtyEvent (Vty.EvKey (KEsc) _) | NoOverlay <- view keybindingsMode os
+                                          , not (isFocusedFooter (view footerMode os)) -> do
+                case view running_task os of
+                  Just tid -> do
+                    liftIO $ killThread tid
+                    put $ appState & majorState . mode . pausedMode . running_task .~ Nothing
+                                   & majorState . mode . pausedMode %~ resetFooter
+                  Nothing -> do
+                    liftIO $ resume debuggee'
+                    put $ initialAppState (_appChan appState)
 
-        RunningMode -> case brickEvent of
-          -- Exit
-          VtyEvent (Vty.EvKey KEsc _) ->
-            halt
-          -- Pause the debuggee
-          VtyEvent (Vty.EvKey (KChar 'p') []) -> do
-            liftIO $ pause debuggee'
-            ver <- liftIO $ GD.version debuggee'
-            (rootsTree, initRoots) <- liftIO $ mkSavedAndGCRootsIOTree
-            put (appState & majorState . mode .~
-                        PausedMode
-                          (OperationalState Nothing
-                                            Nothing
-                                            savedAndGCRoots
-                                            NoOverlay
-                                            FooterInfo
-                                            (DefaultRoots initRoots)
-                                            rootsTree
-                                            eventChan
-                                            (Just 100)
-                                            []
-                                            ver))
+            -- handle any other more local events; mostly key events
+            _ -> liftHandler (majorState . mode) os PausedMode (handleMain debuggee')
+                   (brickEvent)
+
+      where
 
 
-
-          _ -> return ()
-
-        PausedMode os -> case brickEvent of
-          _ -> case brickEvent of
-              -- Resume the debuggee if '^r', exit if ESC
-              VtyEvent (Vty.EvKey (KChar 'r') [Vty.MCtrl]) -> do
-                  liftIO $ resume debuggee'
-                  put (appState & majorState . mode .~ RunningMode)
-              VtyEvent (Vty.EvKey (KEsc) _) | NoOverlay <- view keybindingsMode os
-                                            , not (isFocusedFooter (view footerMode os)) -> do
-                  case view running_task os of
-                    Just tid -> do
-                      liftIO $ killThread tid
-                      put $ appState & majorState . mode . pausedMode . running_task .~ Nothing
-                                     & majorState . mode . pausedMode %~ resetFooter
-                    Nothing -> do
-                      liftIO $ resume debuggee'
-                      put $ initialAppState (_appChan appState)
-
-              -- handle any other more local events; mostly key events
-              _ -> liftHandler (majorState . mode) os PausedMode (handleMain debuggee')
-                     (brickEvent)
-
-
-
-        where
-
-
-        mkSavedAndGCRootsIOTree = do
-          raw_roots <- take 1000 . map ("GC Roots",) <$> GD.rootClosures debuggee'
-          rootClosures' <- liftIO $ mapM (completeClosureDetails debuggee') raw_roots
-          raw_saved <- map ("Saved Object",) <$> GD.savedClosures debuggee'
-          savedClosures' <- liftIO $ mapM (completeClosureDetails debuggee') raw_saved
-          return $ (mkIOTree debuggee' (savedClosures' ++ rootClosures') getChildren renderInlineClosureDesc id
-                   , fmap toPtr <$> (raw_roots ++ raw_saved))
+      mkSavedAndGCRootsIOTree = do
+        raw_roots <- take 1000 . map ("GC Roots",) <$> GD.rootClosures debuggee'
+        rootClosures' <- liftIO $ mapM (completeClosureDetails debuggee') raw_roots
+        raw_saved <- map ("Saved Object",) <$> GD.savedClosures debuggee'
+        savedClosures' <- liftIO $ mapM (completeClosureDetails debuggee') raw_saved
+        return $ (mkIOTree debuggee' (savedClosures' ++ rootClosures') getChildren renderInlineClosureDesc id
+                 , fmap toPtr <$> (raw_roots ++ raw_saved))
 
 
 getChildren :: Debuggee -> ClosureDetails
