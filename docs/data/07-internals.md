@@ -8,14 +8,17 @@ details.
 Perhaps the most important part of the library is the Haskell representation of
 the heap.
 
-Closures are represented by the `DebugClosure pap string s b` type. Each different
+Closures are represented by the type `DebugClosure srt pap string s b`. Each different
 closure type has its own constructor. The type parameters correspond to the
-four different types of pointers which can be found in closures.
+five different types of pointers which can be found in closures.
 
 * `b` - Normal closure pointers
 * `s` - Stack pointer
 * `string` - Pointer to a string (used for ConstrDesc)
 * `pap` - Pointer to a PAP payload
+* `srt` - Pointer to an SRT, see `Note [SRTs]` in GHC source, or [CAFs wiki][]
+
+[CAFs wiki]: https://gitlab.haskell.org/ghc/ghc/-/wikis/commentary/rts/storage/gc/CAFs
 
 For example, constructor closures have the standard layout, an info table followed
 by pointers, followed by data with the addition of a pointer to a description
@@ -37,18 +40,19 @@ representation of the info table in `ghc-debug` also contains the pointer to
 the info table as well as the decoded table.
 
 The easiest way to generically interact with a `DebugClosure pap string s b` is
-using the `Quadtraversable` class, which is a generalisation of `Traversable` to
-work with 4 type parameters.
+using the `Quintraversable` class, which is a generalisation of `Traversable` to
+work with 5 type parameters.
 
 ```haskell
-class Quadtraversable m where
-  quadtraverse ::
+class Quintraversable m where
+  quintraverse ::
     Applicative f => (a -> f b)
                   -> (c -> f d)
                   -> (e -> f g)
                   -> (h -> f i)
-                  -> m a c e h
-                  -> f (m b d g i)
+                  -> (j -> f k)
+                  -> m a c e h j
+                  -> f (m b d g i k)
 ```
 
 ## Decoding Closures
@@ -60,7 +64,7 @@ There are two different ways closures are decoded.
 
 For most closures the raw closure is mapped into memory and the `getClosureRaw`
 function from `ghc-heap` is reused to decode the closure before it is converted
-into the `ghc-heap` representation using `convertClosure`.
+into the `ghc-debug` representation using `convertClosure`.
 
 For common and usual closures, the decoding logic is implemented directly using
 the `Data.Binary` interface. This turns out to be significantly faster (25%ish)

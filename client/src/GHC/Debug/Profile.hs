@@ -268,7 +268,7 @@ writeCensusByClosureType outpath c = do
         ]
 
 {-
--- | Peform a profile at the given interval (in seconds), the result will
+-- | Perform a profile at the given interval (in seconds), the result will
 -- be rendered after each iteration using @eventlog2html@.
 profile :: FilePath -> Int -> Debuggee -> IO ()
 profile outpath interval e = loop [(0, Map.empty)] 0
