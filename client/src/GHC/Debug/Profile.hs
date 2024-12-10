@@ -10,12 +10,15 @@
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE TupleSections #-}
 
 {- | Functions for performing whole heap census in the style of the normal
 - heap profiling -}
 module GHC.Debug.Profile( censusClosureType
                         , census2LevelClosureType
                         , closureCensusBy
+                        , closureFilter
+                        , closureSelector
                         , CensusByClosureType
                         , writeCensusByClosureType
                         , CensusStats(..)
@@ -41,20 +44,28 @@ import GHC.Debug.Client
 import GHC.Debug.Trace
 import GHC.Debug.ParTrace
 import GHC.Debug.Profile.Types
+import GHC.Debug.Types.Ptr
 
-import qualified Data.Map.Strict as Map
+import Control.Monad
 import Control.Monad.State.Strict
+import Data.Bitraversable
+import Data.Bool (bool)
+import Data.IntMap (IntMap)
+import Data.Functor ((<&>))
 import Data.List (sortBy)
 import Data.Ord
 import Data.Text (pack, Text)
 import Data.Semigroup
+import GHC.Prim (coerce)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.IntMap as IntMap
+import qualified Data.IntMap.Monoidal.Strict as MIMap
 import qualified Data.Map.Monoidal.Strict as MMap
-import Data.Bitraversable
-import Control.Monad
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Vector as V
+import Data.Word (Word64)
 
 --import Control.Concurrent
 --import Eventlog.Types
@@ -180,6 +191,39 @@ closureCensusBy f cps = do
       return . (\s' -> ((), s', id)) $ case r of
         Just (k, v) -> MMap.singleton k v
         Nothing -> MMap.empty
+
+closureSelector :: Semigroup a
+                => (ClosurePtr -> SizedClosure -> DebugM (Maybe a))
+                -> [ClosurePtr] -> DebugM (IntMap a)
+closureSelector f cps = do
+  void precacheBlocks
+  MIMap.getMonoidalIntMap <$> traceParFromM funcs (ClosurePtrWithInfo () `map` cps)
+  where
+    pass = pure ()
+    funcs = TraceFunctionsIO
+      { papTrace = const pass, srtTrace = const pass, stackTrace = const pass
+      , closTrace = closureAccum
+      , visitedClosVal = \_ _ -> return MIMap.empty
+      , visitedCcsVal = const $ return MIMap.empty
+      , conDescTrace = const pass
+      , ccsTrace = \_ _ -> return MIMap.empty
+      }
+    closureAccum cp s () = do
+      r <- f cp s
+      return . ((), , id) $ maybe MIMap.empty (MIMap.singleton (closurePtrToInt cp)) r
+
+closureFilter :: (SizedClosure -> DebugM Bool)
+              -> [ClosurePtr]
+              -> DebugM [ClosurePtr]
+closureFilter p = fmap (map closurePtrFromInt . IntMap.keys)
+                . closureSelector w
+  where w ptr sc = p sc
+                <&> bool Nothing (Just $ IntMap.singleton (closurePtrToInt ptr) ())
+
+closurePtrToInt :: ClosurePtr -> Int
+closurePtrToInt = fromIntegral @Word64 . coerce
+closurePtrFromInt :: Int -> ClosurePtr
+closurePtrFromInt = coerce @Word64 . fromIntegral
 
 -- | Perform a 2-level census where the keys are the type of the closure
 -- in addition to the type of ptrs of the closure. This can be used to
@@ -315,5 +359,3 @@ renderProfile ss = do
   writeFile "profile/ht.html" html
   return ()
   -}
-
-
