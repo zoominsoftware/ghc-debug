@@ -1,4 +1,5 @@
-packages: common, stub, client, test, ghc-debug-brick, convention
+packages: common, stub, client, test, ghc-debug-brick, convention,
+    zdocs-heap
 
 -- If you see a Cmm lexical error, then comment out this line
 -- debug-info: 3
