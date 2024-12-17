@@ -55,7 +55,6 @@ import GHC.Debug.Types.Closures
 import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Bitraversable
-import qualified Data.ByteString.Lazy as BS
 
 -- | For heap graphs, i.e. data structures that also represent sharing and
 -- cyclic structures, these are the entries. If the referenced value is
@@ -289,11 +288,11 @@ isTup _ = Nothing
 
 
 
--- | A pretty-printer that tries to generate valid Haskell for evalutated data.
+-- | A pretty-printer that tries to generate valid Haskell for evaluated data.
 -- It assumes that for the included boxes, you already replaced them by Strings
 -- using 'Data.Foldable.map' or, if you need to do IO, 'Data.Foldable.mapM'.
 --
--- The parameter gives the precedendence, to avoid avoidable parenthesises.
+-- The parameter gives the precedendence, to avoid avoidable parentheses.
 ppClosure :: (Int -> c -> String) -> Int -> DebugClosure ccs (GenSrtPayload c) p ConstrDesc s c -> String
 ppClosure showBox prec c = case c of
     _ | Just ch <- isChar c -> app
@@ -327,7 +326,7 @@ ppClosure showBox prec c = case c of
     BCOClosure {..} -> app
         ["_bco", showBox 10 bcoptrs]
     ArrWordsClosure {..} -> app
-        ["ARR_WORDS (", "("++show bytes ++ " bytes)"
+        ["ARR_WORDS", "(" ++ show bytes ++ " bytes)"
         , show . BSL.take (fromIntegral bytes) . arrWordsBS $ arrWords]
     MutArrClosure {..} -> app
         --["toMutArray", "("++show (length mccPayload) ++ " ptrs)",  intercalate "," (shorten (map (showBox 10) mccPayload))]
