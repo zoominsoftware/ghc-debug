@@ -75,14 +75,6 @@ withPaused :: (Debuggee -> IO a) -> Debuggee -> IO a
 withPaused prog target =
   pause target *> prog target <* resume target
 
-analyzeSnaphots = do
-  let analysis = p4 "Entitlement"
-  putStrLn "=== INITIAL state ==="
-  snapshotRun "/tmp/ghc-debug-heap.snap0" analysis
-  putStrLn ""
-  putStrLn "=== POST-TEST state ==="
-  snapshotRun "/tmp/ghc-debug-heap.snap1" analysis
-
 diffSnapshots = do
   -- ghc-debug-brick writes them to XDG dirs
   let snap0 = "/home/ulidtko/.local/share/ghc-debug/debuggee/snapshots/snapshot1"
@@ -127,11 +119,10 @@ loopDownloadTest do_scan do_diff = withDebuggeeConnect "/tmp/ghc-debug" $ \targe
     -- runIteration = spawnCommand "curl -s http://localhost:3000/admin/origbundle/adams_2022_4/enus -o /dev/null -b /tmp/zdocs-cookies" >>= waitForProcess
 
 oneShot do_analysis do_output = withDebuggeeConnect "/tmp/ghc-debug" $ \target -> do
-  analData <- withPaused (`run` do_analysis) target
+  analData <- (`run` do_analysis) `withPaused` target
   do_output analData
 
 -- main = takeSnapshots
--- main = analyzeSnaphots
 -- main = diffSnapshots
 -- main = diffInteractive (gcRoots >>= censusClosureType) diffSrclocCensi
 -- main = loopDownloadTest (gcRoots >>= censusClosureType) diffSrclocCensi
@@ -194,6 +185,7 @@ focusClosuresBAPlainPtrNonCert = focusCtorsBy $ \ConstrDesc{..} ptrArgs dataArgs
               else return True
   | otherwise -> pure False
 
+{- HLINT ignore "Redundant multi-way if" -}
 
 diffCensi cs1 cs2
   | cs1 == cs2 = Nothing
@@ -506,24 +498,6 @@ showCensusStats CS{..} = unwords
   , show . getSize . getMax $ csmax
   ]
 
--- | Count live named closures
-p4 :: T.Text -> Debuggee -> IO ()
-p4 suffix = withPaused $ \target -> do
-   census <- run target $ gcRoots >>= censusClosureType
-   let uniqcs = Map.toList
-              . Map.filterWithKey (\(k, ka) _ -> suffix `T.isSuffixOf` prettyProfileKey k)
-              $ census
-   uniqcs `forM_` \((profk, _), cs) -> do
-     (putStrLn . unwords) [T.unpack (prettyProfileKey profk), "--", showCensusStats cs]
-
--- | TODO Inspect pinned objects transitively retained by savedClosures
--- p5 :: Debuggee -> IO ()
--- p5 = withPaused $ \target -> do
---   saved <- savedClosures target
---   run target $ do
---     bs <- precacheBlocks
---     census <- censusPinnedBlocks bs saved
-
 gatherSuiteshareInventory = do
   roots <- gcRoots
   totals <- GHC.Debug.Count.count roots
@@ -565,8 +539,7 @@ gatherCtorRetainers ctor = do
   --                        (NotFilter . InfoFilter $ (STACK ==) . tipe)
   let filter = ConstructorDescFilter $ (ctor ==) . name
   lblRetainers <- findRetainers (Just 2000) filter roots
-  stacks <- traverse addLocationToStack' lblRetainers
-  pure stacks
+  traverse addLocationToStack' lblRetainers
 outputRetainers = putStrLn . ppRetainerStacks
 
 ppRetainerStacks :: [[(ClosurePtr, SizedClosureP, Maybe SourceInformation)]] -> String
