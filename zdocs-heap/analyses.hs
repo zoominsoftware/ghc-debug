@@ -78,14 +78,17 @@ takeSnapshots = withDebuggeeConnect "/tmp/ghc-debug" $ \target -> do
   run target $ snapshot "/tmp/ghc-debug-heap.snap1"
   resume target
 
-diffSnapshots = do
+diffSnapshots do_scan do_diff = do
   -- ghc-debug-brick writes them to XDG dirs
   let snap0 = "/home/ulidtko/.local/share/ghc-debug/debuggee/snapshots/snapshot1"
   let snap1 = "/home/ulidtko/.local/share/ghc-debug/debuggee/snapshots/snapshot2"
-  cens0 <- snapshotRun snap0 $ flip runTrace (gcRoots >>= censusClosureType)
-  cens1 <- snapshotRun snap1 $ flip runTrace (gcRoots >>= censusClosureType)
-  let diff_census = Map.differenceWith diffCensi cens1 cens0
-  printClosureCensusDiff diff_census
+  putStrLn "First snapshot..."
+  datum0 <- snapshotRun snap0 (`runTrace` do_scan)
+  putStrLn "Second snapshot..."
+  datum1 <- snapshotRun snap1 (`runTrace` do_scan)
+  putStrLn "Now diff..."
+  snapshotRun snap1 $ \target ->
+    do_diff datum0 datum1 target
 
 diffInteractive do_scan do_diff = withDebuggeeConnect "/tmp/ghc-debug" $ \target -> do
   putStrLn "Taking initial heap census..."
@@ -134,7 +137,6 @@ oneShot do_analysis do_output = withDebuggeeConnect "/tmp/ghc-debug" $ \target -
   do_output analData
 
 -- main = takeSnapshots
--- main = diffSnapshots
 -- main = diffInteractive (gcRoots >>= censusClosureType) diffSrclocCensi
 -- main = loopDownloadTest (gcRoots >>= censusClosureType) diffSrclocCensi
 -- main = loopDownloadTest (gcRoots >>= focusCtorsSrcLoc) (diffRetainers "SrcLoc")
@@ -145,7 +147,9 @@ oneShot do_analysis do_output = withDebuggeeConnect "/tmp/ghc-debug" $ \target -
 -- main = diffInteractive gatherBasicHeapProfile diffBasicHeapProfile
 -- main = loopDownloadTest gatherSuiteshareInventory summarizeSuiteshareInventory
 -- main = oneShot (gatherCtorRetainers "App") outputRetainers
-main = loopDownloadTestWithState gatherCorkState summarizeCorkStep mempty
+-- main = diffSnapshots gatherBasicHeapProfile diffBasicHeapProfile
+-- main = diffSnapshots gatherSuiteshareInventory summarizeSuiteshareInventory
+main = diffSnapshots gatherCorkState summarizeCorkStep
 
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
@@ -553,13 +557,15 @@ twoNums x0 x1
 -- | "Cork"-style analysis, see https://dl.acm.org/doi/10.1145/1190216.1190224
 type CorkDebugM a = StateT RankMaps IO a
 gatherCorkState :: DebugM TypePointsFrom
-gatherCorkState = gcRoots >>= typePointsFrom
-summarizeCorkStep :: TypePointsFrom -> TypePointsFrom -> Debuggee -> CorkDebugM ()
+gatherCorkState = do
+  roots <- gcRoots
+  apps <- flip focusCtorsBy roots $ \ConstrDesc{..} _ _ _ -> pure $ name == "App"
+  typePointsFrom apps
+summarizeCorkStep :: TypePointsFrom -> TypePointsFrom -> Debuggee -> IO ()
 summarizeCorkStep tpf0 tpf1 dbg = do
-  State.modify' (\rm0 -> updateRankMap rm0 tpf0 tpf1)
-  rankmaps <- State.get
+  let rankmaps = updateRankMap mempty tpf0 tpf1
   let candidates = chooseCandidates (fst rankmaps)
-  graphvizSlices <- lift . run dbg
+  graphvizSlices <- run dbg
                   $ forM (take 10 candidates)
                   $ findSlice (snd rankmaps)
   liftIO $ do
