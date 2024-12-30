@@ -18,3 +18,5 @@ executable zdocs-heap
     process, time,
 
     bytestring, containers, text, ghc
+
+  ghc-options: -O2 -threaded -rtsopts -with-rtsopts=-N
