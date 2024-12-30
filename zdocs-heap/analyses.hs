@@ -140,7 +140,7 @@ oneShot do_analysis do_output = withDebuggeeConnect "/tmp/ghc-debug" $ \target -
 -- main = loopDownloadTest (gcRoots >>= focusCtorsSrcLoc) (diffRetainers "SrcLoc")
 -- main = loopDownloadTest (gcRoots >>= focusCtorsAllBS) (diffRetainers "BS")
 -- main = snapshotRun "/tmp/ghc-debug-heap.snap0" $ \t -> run t (gcRoots >>= groupedBytestrings) >>= printCtorCensus . filterOutCerts
--- main = loopDownloadTest (liftM2 (,) gatherBsInventory gatherBlockInventory) diffInventory
+-- main = loopDownloadTest (liftM2 (,) gatherBsInventory gatherBlockInventory) diffBlocks
 -- main = loopDownloadTest (gcRoots >>= thunkAnalysis) diffThunks
 -- main = diffInteractive gatherBasicHeapProfile diffBasicHeapProfile
 -- main = loopDownloadTest gatherSuiteshareInventory summarizeSuiteshareInventory
@@ -277,7 +277,7 @@ gatherBlockInventory = do
   let blockCounts = (length allblocks, length pinnedblocks, length megablocks, length pmegablocks)
   pure (censusPinned, blockCounts, megablocks, pmegablocks)
 
-diffInventory cens0 cens1 target = do
+diffBlocks cens0 cens1 target = do
   -- let (bsAll, bsPlain, bsNoncert, pinned) = cens0
   let ( (bsAll', bsPlain', bsNoncert', byFptr', noncerts')
         , (pinned', (bcA, bcP, bcM, bcMP), mbs, pmbs)) = cens1
@@ -513,25 +513,27 @@ showCensusStats CS{..} = unwords
 gatherSuiteshareInventory = do
   roots <- gcRoots
   totals <- GHC.Debug.Count.count roots
-  suiteshareData <- flip focusCtorsBy roots $ \ConstrDesc{..} _ _ _ -> pure $
-    "suiteshare-" `isPrefixOf` pkg
-  navs <- flip focusCtorsBy suiteshareData $ \ConstrDesc{..} _ _ _ -> pure $
-    modl == "SuiteShare.Types" && name == "Nav"
-  lbls <- flip focusCtorsBy suiteshareData $ \ConstrDesc{..} _ _ _ -> pure $
-    modl == "SuiteShare.Types" && name == "Label"
-  cens <- censusClosureType suiteshareData
+  zdocsData <- flip focusCtorsBy roots $ \ConstrDesc{..} _ _ _ -> pure $
+    "suiteshare-" `isPrefixOf` pkg || "zdocs-" `isPrefixOf` pkg
+  apps <- flip focusCtorsBy zdocsData $ \ConstrDesc{..} _ _ _ -> pure $ name == "App"
+  cens <- censusClosureType zdocsData
        <&> Map.filter ((> 1) . getCount . cscount) -- omit singleton allocs
+  navs <- flip focusCtorsBy zdocsData $ \ConstrDesc{..} _ _ _ -> pure $
+    modl == "SuiteShare.Types" && name == "Nav"
+  lbls <- flip focusCtorsBy zdocsData $ \ConstrDesc{..} _ _ _ -> pure $
+    modl == "SuiteShare.Types" && name == "Label"
   hgLbls <- multiBuildHeapGraph (Just 5) (head lbls :| tail lbls)
-  pure (totals, suiteshareData, cens, navs, lbls, hgLbls)
+  pure (totals, zdocsData, cens, apps, navs, lbls, hgLbls)
 
-summarizeSuiteshareInventory (totals0, ctors0, cens0, navs0, lbls0, lbls0hg)
-                             (totals1, ctors1, cens1, navs1, lbls1, lbls1hg)
+summarizeSuiteshareInventory (totals0, ctors0, cens0, apps0, navs0, lbls0, lbls0hg)
+                             (totals1, ctors1, cens1, apps1, navs1, lbls1, lbls1hg)
                              dbg = do
   summarizeHeapstatChange totals0 totals1 dbg
-  printf "Data constructor allocations of zdocs package types: %d -> %d\n"
-         (length ctors0) (length ctors1)
-  printf "Alive count of SuiteShare.Types.Nav: %5d -> %-5d\n" (length navs0) (length navs1)
-  printf "Alive count of SuiteShare.Types.Label: %5d -> %-5d\n" (length lbls0) (length lbls1)
+  printf "All data-constructor allocations of zdocs package types: %s\n" $
+         twoNums (length ctors0) (length ctors1)
+  printf "Distinct instances of App singleton:%24s\n" $ twoNums (length apps0) (length apps1)
+  printf "Alive count of SuiteShare.Types.Nav:%24s\n" $ twoNums (length navs0) (length navs1)
+  printf "Alive count of SuiteShare.Types.Label:%22s\n" $ twoNums (length lbls0) (length lbls1)
   putStrLn "Allocs transitively rooted in zdocs package data-ctors, diff:"
   let diff = Map.differenceWith diffCensi cens1 cens0
   printClosureCensusDiff diff
@@ -542,6 +544,11 @@ summarizeSuiteshareInventory (totals0, ctors0, cens0, navs0, lbls0, lbls0hg)
     writeFile "heapgraph.labels.next.txt" $
       ppAcyclicHeapGraph ((<>" bytes") . show . getSize) lbls1hg
     putStrLn "Wrote heapgraph.labels.{prev,next}.txt"
+
+twoNums :: Int -> Int -> String
+twoNums x0 x1
+  | x0 == x1 = show x0
+  | otherwise = printf "%d -> %d -- %+d" x0 x1 (x1 - x0)
 
 -- | "Cork"-style analysis, see https://dl.acm.org/doi/10.1145/1190216.1190224
 type CorkDebugM a = StateT RankMaps IO a
