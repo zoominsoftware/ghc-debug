@@ -41,7 +41,7 @@ import qualified Data.Text.Encoding as TE
 
 import GHC.Debug.Client hiding (DebugM)
 import GHC.Debug.Client.Monad.Simple (DebugM(..))
-import GHC.Debug.Count (count)
+import GHC.Debug.Count (parCount)
 import GHC.Debug.Fragmentation
 import GHC.Debug.ObjectEquiv
 import GHC.Debug.Profile
@@ -221,7 +221,7 @@ summarizeHeapstatChange cens0 cens1 _target = do
     printf "        largest: %9d -> %-9d -- %-+8d\n" largest0 largest1 (largest1 - largest0)
 gatherBasicHeapProfile = do
   roots <- gcRoots
-  totals <- GHC.Debug.Count.count roots
+  totals <- GHC.Debug.Count.parCount roots
   census <- censusClosureType roots
   return (totals, census)
 diffBasicHeapProfile (totals0, clos0) (totals1, clos1) target = do
@@ -512,7 +512,7 @@ showCensusStats CS{..} = unwords
 
 gatherSuiteshareInventory = do
   roots <- gcRoots
-  totals <- GHC.Debug.Count.count roots
+  totals <- GHC.Debug.Count.parCount roots
   zdocsData <- flip focusCtorsBy roots $ \ConstrDesc{..} _ _ _ -> pure $
     "suiteshare-" `isPrefixOf` pkg || "zdocs-" `isPrefixOf` pkg
   apps <- flip focusCtorsBy zdocsData $ \ConstrDesc{..} _ _ _ -> pure $ name == "App"
