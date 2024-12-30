@@ -25,21 +25,22 @@ module GHC.Debug.TypePointsFrom( typePointsFrom
                                , getKey
                                ) where
 
+import Control.Monad.Identity
+import Control.Concurrent
+import Control.Monad
+import Control.Monad.State
+import Data.List (sortOn)
+import Data.Map (Map)
+import Data.Ord (Down(..))
 import GHC.Debug.Client.Monad
 import GHC.Debug.Client
-import Control.Monad.State
 import GHC.Debug.ParTrace
 import GHC.Debug.Types.Ptr
 import qualified Data.Map.Monoidal.Strict as Map
-import Data.Map (Map)
 import qualified Data.Map.Internal as M
 import GHC.Debug.Profile
-import Control.Monad.Identity
-import Control.Concurrent
-import Data.List (sortOn)
 import Language.Dot
 import qualified Data.Set as S
-import Control.Monad
 
 
 type Key = InfoTablePtr
@@ -226,7 +227,8 @@ escapeQuotes (x:xs) = x:escapeQuotes xs
 
 
 chooseCandidates :: RankMap Key -> [Key]
-chooseCandidates = map fst . reverse . sortOn (getRank . snd) . M.assocs . M.filter applyRankFilter
+chooseCandidates = map fst . sortOn (Down . getRank . snd)
+                 . M.assocs . M.filter applyRankFilter
 
 type RankMap k = M.Map k RankInfo
 
@@ -285,6 +287,4 @@ ratioRank t1 t2 = (candidates, redges)
     !candidates = runIdentity $ M.mergeA missingL missingR matched ns1 ns2
 
     !redges = runIdentity $ M.mergeA missingL missingR matched es1 es2
-
-
 
