@@ -23,6 +23,8 @@ module GHC.Debug.TypePointsFrom( typePointsFrom
                                , Key
                                , Edge(..)
                                , getKey
+                               , RankMaps, updateRankMap, chooseCandidates, findSlice
+                               , renderDot
                                ) where
 
 import Control.Monad.Identity

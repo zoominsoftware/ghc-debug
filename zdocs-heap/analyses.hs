@@ -10,6 +10,7 @@
 
 import Control.Concurrent (threadDelay)
 import Control.Monad
+import Control.Monad.State.Strict as State
 import Data.Char (chr)
 import Data.Containers.ListUtils (nubOrd)
 import Data.Coerce (coerce)
@@ -38,7 +39,8 @@ import qualified Data.Text as T
 import qualified Data.Text.Internal as TI
 import qualified Data.Text.Encoding as TE
 
-import GHC.Debug.Client
+import GHC.Debug.Client hiding (DebugM)
+import GHC.Debug.Client.Monad.Simple (DebugM(..))
 import GHC.Debug.Count (count)
 import GHC.Debug.Fragmentation
 import GHC.Debug.ObjectEquiv
@@ -55,11 +57,16 @@ import GHC.Debug.Retainers
       ClosureFilter(..))
 import GHC.Debug.Snapshot (snapshot)
 import GHC.Debug.Thunks (thunkAnalysis)
+import GHC.Debug.TypePointsFrom
 import GHC.Debug.Types.Graph (ppClosure)
 import GHC.Debug.Types.Ptr (BlockPtr(..), ClosurePtr(..), blockMBlock, isPinnedBlock, rawBlockAddr, arrWordsBS)
 
 import GHC.Utils.Misc (sortWith)
 import GHC.Stack (SrcLoc(..), prettySrcLoc)
+
+withPaused :: (Debuggee -> IO a) -> Debuggee -> IO a
+withPaused prog target =
+  pause target *> prog target <* resume target
 
 takeSnapshots = withDebuggeeConnect "/tmp/ghc-debug" $ \target -> do
   putStrLn "Saving snapshot..."
@@ -70,10 +77,6 @@ takeSnapshots = withDebuggeeConnect "/tmp/ghc-debug" $ \target -> do
   pause target
   run target $ snapshot "/tmp/ghc-debug-heap.snap1"
   resume target
-
-withPaused :: (Debuggee -> IO a) -> Debuggee -> IO a
-withPaused prog target =
-  pause target *> prog target <* resume target
 
 diffSnapshots = do
   -- ghc-debug-brick writes them to XDG dirs
@@ -99,24 +102,32 @@ diffInteractive do_scan do_diff = withDebuggeeConnect "/tmp/ghc-debug" $ \target
       resume target
       go target cens1
 
-loopDownloadTest do_scan do_diff = withDebuggeeConnect "/tmp/ghc-debug" $ \target -> do
+loopDownloadTestWithState :: DebugM a -> (a -> a -> Debuggee -> StateT s IO ()) -> s -> IO bottom
+loopDownloadTestWithState do_scan do_diff state0
+  = withDebuggeeConnect "/tmp/ghc-debug" $ \target -> do
   putStrLn "Connected to debuggee, taking initial heap census..."
-  census_init <- flip withPaused target $ flip run do_scan
-  go target census_init
+  initial <- flip withPaused target $ flip run do_scan
+  State.evalStateT (go target initial) state0
   where
-    go target cens0 = do
-      putStrLn ""
-      now <- getCurrentTime
-      putStrLn ("Running test iteration... " <> formatShow iso8601Format now)
-      runIteration
-      putStrLn "Delay for idle GC..." >> threadDelay 2_500_000 >> pause target
-      cens1 <- run target do_scan
-      putStrLn "Analysis..." >> do_diff cens0 cens1 target
-      resume target
-      go target cens1
+    go target datum0 = do
+      datum' <- liftIO $ do
+        putStrLn ""
+        now <- getCurrentTime
+        putStrLn $ "Running test iteration... " <> formatShow iso8601Format now
+        runIteration
+        putStrLn "Delay for idle GC..." >> threadDelay 2_500_000 >> pause target
+        run target do_scan
+      liftIO (putStrLn "Analysis...") >> do_diff datum0 datum' target
+      liftIO $ resume target
+      go target datum'
     -- runIteration = spawnCommand "curl -s http://localhost:3000/admin/downloadbundle/adams_2022_4/enus -o /dev/null -b /tmp/zdocs-cookies" >>= waitForProcess
     runIteration = spawnCommand "curl -s http://localhost:3000/admin/origbundle/adams_modeler_2022.1/enus -o /dev/null -b /tmp/zdocs-cookies" >>= waitForProcess
     -- runIteration = spawnCommand "curl -s http://localhost:3000/admin/origbundle/adams_2022_4/enus -o /dev/null -b /tmp/zdocs-cookies" >>= waitForProcess
+    -- TODO /api/categories
+
+loopDownloadTest :: DebugM a -> (a -> a -> Debuggee -> IO ()) -> IO bottom
+loopDownloadTest do_scan do_diff
+  = loopDownloadTestWithState do_scan (\x0 x1 dbg -> liftIO $ do_diff x0 x1 dbg) ()
 
 oneShot do_analysis do_output = withDebuggeeConnect "/tmp/ghc-debug" $ \target -> do
   analData <- (`run` do_analysis) `withPaused` target
@@ -131,9 +142,10 @@ oneShot do_analysis do_output = withDebuggeeConnect "/tmp/ghc-debug" $ \target -
 -- main = snapshotRun "/tmp/ghc-debug-heap.snap0" $ \t -> run t (gcRoots >>= groupedBytestrings) >>= printCtorCensus . filterOutCerts
 -- main = loopDownloadTest (liftM2 (,) gatherBsInventory gatherBlockInventory) diffInventory
 -- main = loopDownloadTest (gcRoots >>= thunkAnalysis) diffThunks
-main = diffInteractive gatherBasicHeapProfile diffBasicHeapProfile
+-- main = diffInteractive gatherBasicHeapProfile diffBasicHeapProfile
 -- main = loopDownloadTest gatherSuiteshareInventory summarizeSuiteshareInventory
 -- main = oneShot (gatherCtorRetainers "App") outputRetainers
+main = loopDownloadTestWithState gatherCorkState summarizeCorkStep mempty
 
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
@@ -530,6 +542,26 @@ summarizeSuiteshareInventory (totals0, ctors0, cens0, navs0, lbls0, lbls0hg)
     writeFile "heapgraph.labels.next.txt" $
       ppAcyclicHeapGraph ((<>" bytes") . show . getSize) lbls1hg
     putStrLn "Wrote heapgraph.labels.{prev,next}.txt"
+
+-- | "Cork"-style analysis, see https://dl.acm.org/doi/10.1145/1190216.1190224
+type CorkDebugM a = StateT RankMaps IO a
+gatherCorkState :: DebugM TypePointsFrom
+gatherCorkState = gcRoots >>= typePointsFrom
+summarizeCorkStep :: TypePointsFrom -> TypePointsFrom -> Debuggee -> CorkDebugM ()
+summarizeCorkStep tpf0 tpf1 dbg = do
+  State.modify' (\rm0 -> updateRankMap rm0 tpf0 tpf1)
+  rankmaps <- State.get
+  let candidates = chooseCandidates (fst rankmaps)
+  graphvizSlices <- lift . run dbg
+                  $ forM (take 10 candidates)
+                  $ findSlice (snd rankmaps)
+  liftIO $ do
+    outputs <- zip [0..] graphvizSlices & mapM (\(n, g) -> do
+      let fn = "slices/" ++ show @Int n ++ ".dot"
+      writeFile fn (renderDot g)
+      return fn
+      )
+    putStrLn $ "Written " <> show outputs
 
 gatherCtorRetainers ctor = do
   roots <- gcRoots
